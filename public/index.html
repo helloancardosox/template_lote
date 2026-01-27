@@ -201,26 +201,32 @@
 
         // --- Fila de Templates ---
 
-        // Adicionar à fila e contar cópias
-        document.getElementById('templateForm').addEventListener('submit', (e) => {
+        // Adicionar à fila e contar cópias, agora pedindo exemplos para variáveis
+        document.getElementById('templateForm').addEventListener('submit', async (e) => {
             e.preventDefault();
-            
             const name = document.getElementById('tplName').value.trim().toLowerCase().replace(/\s+/g, '_');
             const bodyText = document.getElementById('tplBody').value;
             const lang = document.getElementById('tplLang').value;
             const copies = parseInt(document.getElementById('tplCopiesCount').value) || 1;
-            
-            const variableCount = (bodyText.match(/\{\{\d+\}\}/g) || []).length;
-            const examples = variableCount > 0 ? Array(variableCount).fill("Exemplo") : [];
 
-            // A fila guarda a intenção, não as cópias expandidas ainda (para não poluir a UI)
-            // Ou guardamos expandido? Melhor guardar a intenção "Lote de X"
-            
+            const variableMatches = bodyText.match(/\{\{\d+\}\}/g) || [];
+            const variableCount = variableMatches.length;
+            let examples = [];
+
+            if (variableCount > 0) {
+                // Prompt simples para exemplos (pode ser melhorado para modal futuramente)
+                for (let i = 0; i < variableCount; i++) {
+                    let ex = prompt(`Informe um exemplo para a variável ${variableMatches[i]}:`);
+                    if (!ex) ex = `Exemplo${i+1}`;
+                    examples.push(ex);
+                }
+            }
+
             const templateItem = {
                 baseName: name,
-                copies: copies, 
+                copies: copies,
                 payload: {
-                    name: name, // Será modificado no backend ou aqui se expandirmos
+                    name: name,
                     language: lang,
                     category: "UTILITY",
                     structure: {
@@ -232,7 +238,7 @@
 
             templateQueue.push(templateItem);
             updateQueueUI();
-            
+
             document.getElementById('tplName').value = '';
             document.getElementById('tplBody').value = '';
             document.getElementById('tplName').focus();

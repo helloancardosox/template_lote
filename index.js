@@ -15,7 +15,10 @@ const path = require('path');
 // Garante que a chave não tenha 'App ' duplicado se o usuário colocou no .env
 const RAW_KEY = process.env.INFOBIP_API_KEY || '6780e7b1377596c3f9bc2d224a0234a9-5867bc97-31cc-4296-99a4-b9f447ad0869';
 const INFOBIP_API_KEY = RAW_KEY.startsWith('App ') ? RAW_KEY.split(' ')[1] : RAW_KEY;
-const INFOBIP_BASE_URL = process.env.INFOBIP_BASE_URL || '38x6pj.api-us.infobip.com';
+// Garante que a URL base tenha https://
+let rawBaseUrl = process.env.INFOBIP_BASE_URL || '38x6pj.api-us.infobip.com';
+if (!rawBaseUrl.startsWith('http')) rawBaseUrl = 'https://' + rawBaseUrl;
+const INFOBIP_BASE_URL = rawBaseUrl.replace(/\/$/, ''); // remove barra final se houver
 
 const SENDERS_FILE = path.join(__dirname, 'senders.json');
 
@@ -158,7 +161,11 @@ app.post('/api/senders/register', async (req, res) => {
                 locale: 'pt_BR'
             },
             {
-                headers: { 'Authorization': `App ${INFOBIP_API_KEY}`, 'Content-Type': 'application/json' }
+                headers: {
+                    'Authorization': `App ${INFOBIP_API_KEY}`,
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                }
             }
         );
 
@@ -192,7 +199,11 @@ app.post('/api/senders/verify', async (req, res) => {
             `${INFOBIP_BASE_URL}/whatsapp/1/embedded-signup/registrations/senders/${phoneNumber}/verification`,
             { code: code },
             {
-                headers: { 'Authorization': `App ${INFOBIP_API_KEY}`, 'Content-Type': 'application/json' }
+                headers: {
+                    'Authorization': `App ${INFOBIP_API_KEY}`,
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                }
             }
         );
 
@@ -258,17 +269,17 @@ app.post('/api/templates/infobip', async (req, res) => {
              template.name = template.name.toLowerCase().replace(/\s+/g, '_');
         }
 
-        const response = await axios.post(
-          `${INFOBIP_BASE_URL}/whatsapp/2/senders/${sender}/templates`,
-          template,
-          {
-            headers: {
-              'Authorization': `App ${INFOBIP_API_KEY}`,
-              'Content-Type': 'application/json',
-              'Accept': 'application/json'
-            }
-          }
-        );
+                const response = await axios.post(
+                    `${INFOBIP_BASE_URL}/whatsapp/2/senders/${sender}/templates`,
+                    template,
+                    {
+                        headers: {
+                            'Authorization': `App ${INFOBIP_API_KEY}`,
+                            'Content-Type': 'application/json',
+                            'Accept': 'application/json'
+                        }
+                    }
+                );
         console.log(`Template criado: ${template.name}`);
         results.push({ name: template.name, success: true, data: response.data });
       } catch (error) {
