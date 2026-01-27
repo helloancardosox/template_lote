@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Criador de Templates em Lote - Infobip</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { padding-top: 20px; background-color: #f8f9fa; }
+        .container { max-width: 900px; }
+        .template-card { background: white; border: 1px solid #dee2e6; border-radius: 8px; padding: 15px; margin-bottom: 10px; }
+        .log-area { background: #212529; color: #0f0; padding: 15px; border-radius: 5px; height: 300px; overflow-y: auto; font-family: monospace; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2 class="mb-4 text-primary">Criador de Templates em Lote (Infobip)</h2>
+        
+        <div class="row">
+            <div class="col-md-6">
+                <div class="card mb-4">
+                    <div class="card-header bg-white fw-bold">Novo Template</div>
+                    <div class="card-body">
+                        <form id="templateForm">
+                            <div class="mb-3">
+                                <label class="form-label">Nome do Template</label>
+                                <input type="text" class="form-control" id="tplName" placeholder="ex: aviso_vencimento" required>
+                                <div class="form-text">Apenas letras minúsculas e _</div>
+                            </div>
+
+                            <div class="mb-3">
+                                <label class="form-label">Idioma</label>
+                                <select class="form-select" id="tplLang">
+                                    <option value="pt_BR">Português (Brasil)</option>
+                                    <option value="en_US">Inglês (EUA)</option>
+                                    <option value="es_ES">Espanhol (Espanha)</option>
+                                    <option value="es_MX">Espanhol (México)</option>
+                                </select>
+                            </div>
+
+                            <div class="mb-3">
+                                <label class="form-label">Texto do Corpo</label>
+                                <textarea class="form-control" id="tplBody" rows="4" placeholder="Olá {{1}}, seu boleto vence hoje." required></textarea>
+                                <div class="form-text">Para variáveis use {{1}}, {{2}}, etc.</div>
+                            </div>
+
+                            <!-- Categoria fixa em UTILITY conforme solicitado -->
+                            <input type="hidden" id="tplCategory" value="UTILITY">
+
+                            <button type="submit" class="btn btn-success w-100">Adicionar à Fila</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-6">
+                <div class="card mb-4">
+                    <div class="card-header bg-white fw-bold d-flex justify-content-between align-items-center">
+                        Fila de Criação
+                        <span class="badge bg-primary rounded-pill" id="queueCount">0</span>
+                    </div>
+                    <div class="card-body p-2 bg-light" id="queueList" style="height: 380px; overflow-y: auto;">
+                        <div class="text-center text-muted mt-5">Nenhum template na fila</div>
+                    </div>
+                    <div class="card-footer">
+                        <button class="btn btn-primary w-100" id="btnProcess" disabled>Criar Templates na Infobip</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header bg-dark text-white">Log de Execução</div>
+            <div class="card-body p-0">
+                <div class="log-area" id="logArea">Aguardando início...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let templateQueue = [];
+
+        // Adicionar à fila
+        document.getElementById('templateForm').addEventListener('submit', (e) => {
+            e.preventDefault();
+            
+            const name = document.getElementById('tplName').value.trim().toLowerCase().replace(/\s+/g, '_');
+            const bodyText = document.getElementById('tplBody').value;
+            const lang = document.getElementById('tplLang').value;
+            
+            // Extrair exemplos básicos se houver variáveis {{1}}
+            const variableCount = (bodyText.match(/\{\{\d+\}\}/g) || []).length;
+            const examples = variableCount > 0 ? Array(variableCount).fill("Exemplo") : [];
+
+            const template = {
+                name: name,
+                language: lang,
+                category: "UTILITY",
+                structure: {
+                    body: {
+                        text: bodyText,
+                        examples: examples.length > 0 ? examples : undefined
+                    },
+                    type: "TEXT"
+                }
+            };
+
+            templateQueue.push(template);
+            updateQueueUI();
+            
+            // Limpar formulário parcial
+            document.getElementById('tplName').value = '';
+            document.getElementById('tplBody').value = '';
+            document.getElementById('tplName').focus();
+        });
+
+        // Atualizar UI
+        function updateQueueUI() {
+            const list = document.getElementById('queueList');
+            const btn = document.getElementById('btnProcess');
+            const count = document.getElementById('queueCount');
+            
+            count.textContent = templateQueue.length;
+            btn.disabled = templateQueue.length === 0;
+
+            if (templateQueue.length === 0) {
+                list.innerHTML = '<div class="text-center text-muted mt-5">Nenhum template na fila</div>';
+                return;
+            }
+
+            list.innerHTML = templateQueue.map((t, index) => `
+                <div class="template-card">
+                    <div class="d-flex justify-content-between">
+                        <strong>${t.name}</strong>
+                        <button class="btn btn-sm btn-outline-danger" onclick="removeFromQueue(${index})">×</button>
+                    </div>
+                    <div class="small text-muted">${t.language} | UTILITY</div>
+                    <div class="mt-2 small text-truncate">${t.structure.body.text}</div>
+                </div>
+            `).join('');
+        }
+
+        window.removeFromQueue = (index) => {
+            templateQueue.splice(index, 1);
+            updateQueueUI();
+        };
+
+        function log(msg, type = 'info') {
+            const logArea = document.getElementById('logArea');
+            const color = type === 'error' ? '#ff6b6b' : (type === 'success' ? '#51cf66' : '#fff');
+            logArea.innerHTML += `<div style="color:${color}">[${new Date().toLocaleTimeString()}] ${msg}</div>`;
+            logArea.scrollTop = logArea.scrollHeight;
+        }
+
+        // Processar Fila
+        document.getElementById('btnProcess').addEventListener('click', async () => {
+            const btn = document.getElementById('btnProcess');
+            btn.disabled = true;
+            btn.textContent = 'Processando...';
+            log('Iniciando envio para Infobip...', 'info');
+
+            try {
+                const response = await fetch('/api/templates/infobip', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ templates: templateQueue })
+                });
+
+                const result = await response.json();
+
+                if (result.results) {
+                    result.results.forEach(res => {
+                        if (res.success) {
+                            log(`✅ Template criado: ${res.name}`, 'success');
+                        } else {
+                            const errorMsg = typeof res.error === 'object' ? JSON.stringify(res.error) : res.error;
+                            log(`❌ Erro em ${res.name}: ${errorMsg}`, 'error');
+                        }
+                    });
+                    
+                    // Limpar fila apenas dos sucessos (opcional, aqui limpando tudo para simplificar)
+                    templateQueue = [];
+                    updateQueueUI();
+                    log('Processo finalizado.', 'info');
+                } else {
+                    log('Erro desconhecido na resposta.', 'error');
+                }
+
+            } catch (error) {
+                log(`Erro de conexão: ${error.message}`, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Criar Templates na Infobip';
+            }
+        });
+    </script>
+</body>
+</html>
