@@ -88,6 +88,13 @@
                                 <div class="form-text">Para variáveis use {{1}}, {{2}}</div>
                             </div>
 
+
+                            <div class="mb-3">
+                                <label class="form-label">Botão Click to URL</label>
+                                <input type="url" class="form-control" id="tplButtonUrl" placeholder="https://wa.me/5511999999999">
+                                <div class="form-text">Opcional. Exemplo: link para WhatsApp ou site.</div>
+                            </div>
+
                             <input type="hidden" id="tplCategory" value="UTILITY">
 
                             <button type="submit" class="btn btn-success w-100">Adicionar à Fila</button>
@@ -208,18 +215,39 @@
             const bodyText = document.getElementById('tplBody').value;
             const lang = document.getElementById('tplLang').value;
             const copies = parseInt(document.getElementById('tplCopiesCount').value) || 1;
+            // const headerImage = document.getElementById('tplHeaderImage').value.trim();
+            const buttonUrl = document.getElementById('tplButtonUrl').value.trim();
 
             const variableMatches = bodyText.match(/\{\{\d+\}\}/g) || [];
             const variableCount = variableMatches.length;
             let examples = [];
 
             if (variableCount > 0) {
-                // Prompt simples para exemplos (pode ser melhorado para modal futuramente)
                 for (let i = 0; i < variableCount; i++) {
                     let ex = prompt(`Informe um exemplo para a variável ${variableMatches[i]}:`);
                     if (!ex) ex = `Exemplo${i+1}`;
                     examples.push(ex);
                 }
+            }
+
+
+            // Monta estrutura do template (type SEMPRE 'TEXT', sem header de imagem)
+            let structure = {
+                type: "TEXT",
+                body: { text: bodyText, examples: examples.length > 0 ? examples : undefined }
+            };
+
+            // Botão Click to URL
+            let buttons = [];
+            if (buttonUrl) {
+                buttons.push({
+                    type: "URL",
+                    text: "Abrir WhatsApp",
+                    url: buttonUrl
+                });
+            }
+            if (buttons.length > 0) {
+                structure.buttons = buttons;
             }
 
             const templateItem = {
@@ -229,10 +257,7 @@
                     name: name,
                     language: lang,
                     category: "UTILITY",
-                    structure: {
-                        body: { text: bodyText, examples: examples.length > 0 ? examples : undefined },
-                        type: "TEXT"
-                    }
+                    structure: structure
                 }
             };
 
@@ -241,6 +266,8 @@
 
             document.getElementById('tplName').value = '';
             document.getElementById('tplBody').value = '';
+            // document.getElementById('tplHeaderImage').value = '';
+            document.getElementById('tplButtonUrl').value = '';
             document.getElementById('tplName').focus();
         });
 
