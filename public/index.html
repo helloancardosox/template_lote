@@ -14,37 +14,80 @@
 </head>
 <body>
     <div class="container">
-        <h2 class="mb-4 text-primary">Criador de Templates em Lote (Infobip)</h2>
+        <h2 class="mb-4 text-primary">Criador de Templates Massivo - Infobip</h2>
         
+        <!-- Configuração de Sender -->
+        <div class="card mb-4 border-warning">
+            <div class="card-header bg-warning text-dark fw-bold">Configuração de Sender</div>
+            <div class="card-body">
+                <div class="row g-3 align-items-end">
+                    <div class="col-md-4">
+                        <label class="form-label">Selecionar Sender Existente</label>
+                        <select class="form-select" id="senderSelect">
+                            <option value="">Carregando...</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <button class="btn btn-outline-dark w-100" id="btnRefreshSenders">🔄 Atualizar</button>
+                    </div>
+                </div>
+                
+                <hr>
+                
+                <h6 class="text-muted">Cadastrar Novo Sender (Embedded Signup)</h6>
+                <div class="row g-3 align-items-end">
+                    <div class="col-md-3">
+                         <input type="text" class="form-control" id="newSenderNumber" placeholder="Número (ex: 5511999999999)">
+                    </div>
+                    <div class="col-md-3">
+                         <input type="text" class="form-control" id="newWabaId" placeholder="WABA ID (Business ID)">
+                    </div>
+                    <div class="col-md-2">
+                        <button class="btn btn-secondary w-100" id="btnRegisterSender">Registrar</button>
+                    </div>
+                    <div class="col-md-2">
+                        <input type="text" class="form-control" id="verifyCode" placeholder="Código PIN (6 dígitos)" style="display:none">
+                    </div>
+                    <div class="col-md-2">
+                        <button class="btn btn-success w-100" id="btnVerifySender" style="display:none">Validar PIN</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <div class="row">
             <div class="col-md-6">
                 <div class="card mb-4">
-                    <div class="card-header bg-white fw-bold">Novo Template</div>
+                    <div class="card-header bg-white fw-bold">Definir Template Base</div>
                     <div class="card-body">
                         <form id="templateForm">
                             <div class="mb-3">
-                                <label class="form-label">Nome do Template</label>
+                                <label class="form-label">Nome Base do Template</label>
                                 <input type="text" class="form-control" id="tplName" placeholder="ex: aviso_vencimento" required>
-                                <div class="form-text">Apenas letras minúsculas e _</div>
+                                <div class="form-text">Será gerado: nome_1, nome_2... se > 1 cópia</div>
                             </div>
 
-                            <div class="mb-3">
-                                <label class="form-label">Idioma</label>
-                                <select class="form-select" id="tplLang">
-                                    <option value="pt_BR">Português (Brasil)</option>
-                                    <option value="en_US">Inglês (EUA)</option>
-                                    <option value="es_ES">Espanhol (Espanha)</option>
-                                    <option value="es_MX">Espanhol (México)</option>
-                                </select>
+                            <div class="row mb-3">
+                                <div class="col-md-6">
+                                    <label class="form-label">Idioma</label>
+                                    <select class="form-select" id="tplLang">
+                                        <option value="pt_BR">Português (Brasil)</option>
+                                        <option value="en_US">Inglês (EUA)</option>
+                                        <option value="es_ES">Espanhol</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Quantidade de Cópias</label>
+                                    <input type="number" class="form-control" id="tplCopiesCount" value="1" min="1" max="100">
+                                </div>
                             </div>
 
                             <div class="mb-3">
                                 <label class="form-label">Texto do Corpo</label>
                                 <textarea class="form-control" id="tplBody" rows="4" placeholder="Olá {{1}}, seu boleto vence hoje." required></textarea>
-                                <div class="form-text">Para variáveis use {{1}}, {{2}}, etc.</div>
+                                <div class="form-text">Para variáveis use {{1}}, {{2}}</div>
                             </div>
 
-                            <!-- Categoria fixa em UTILITY conforme solicitado -->
                             <input type="hidden" id="tplCategory" value="UTILITY">
 
                             <button type="submit" class="btn btn-success w-100">Adicionar à Fila</button>
@@ -54,6 +97,7 @@
             </div>
 
             <div class="col-md-6">
+                <!-- Fila (Mantida igual, mas lógica JS abaixo muda) -->
                 <div class="card mb-4">
                     <div class="card-header bg-white fw-bold d-flex justify-content-between align-items-center">
                         Fila de Criação
@@ -63,7 +107,7 @@
                         <div class="text-center text-muted mt-5">Nenhum template na fila</div>
                     </div>
                     <div class="card-footer">
-                        <button class="btn btn-primary w-100" id="btnProcess" disabled>Criar Templates na Infobip</button>
+                        <button class="btn btn-primary w-100" id="btnProcess" disabled>⚙️ Criar Templates na Infobip</button>
                     </div>
                 </div>
             </div>
@@ -80,41 +124,121 @@
     <script>
         let templateQueue = [];
 
-        // Adicionar à fila
+        // --- Gerenciamento de Senders ---
+        async function loadSenders() {
+            const select = document.getElementById('senderSelect');
+            select.innerHTML = '<option>Carregando...</option>';
+            try {
+                const res = await fetch('/api/senders');
+                const senders = await res.json();
+                
+                select.innerHTML = '<option value="">Selecione um sender...</option>';
+                senders.forEach(s => {
+                    const verifiedMark = s.status === 'VERIFIED' ? '✅' : '⏳';
+                    const option = document.createElement('option');
+                    option.value = s.phoneNumber;
+                    option.text = `${verifiedMark} ${s.displayName || s.phoneNumber} (${s.phoneNumber})`;
+                    select.appendChild(option);
+                });
+            } catch (e) {
+                select.innerHTML = '<option>Erro ao carregar</option>';
+            }
+        }
+
+        document.getElementById('btnRefreshSenders').onclick = loadSenders;
+        loadSenders(); // Load on start
+
+        // Registro de Sender
+        document.getElementById('btnRegisterSender').onclick = async () => {
+            const phoneNumber = document.getElementById('newSenderNumber').value;
+            const wabaId = document.getElementById('newWabaId').value;
+            
+            if(!phoneNumber || !wabaId) return alert('Preencha Número e WABA ID');
+
+            log('Solicitando registro do sender...', 'info');
+            try {
+                const res = await fetch('/api/senders/register', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ phoneNumber, wabaId, displayName: 'Novo Sender' })
+                });
+                const data = await res.json();
+                if(data.success) {
+                    log('✅ Código enviado! Verifique seu celular.', 'success');
+                    document.getElementById('verifyCode').style.display = 'block';
+                    document.getElementById('btnVerifySender').style.display = 'block';
+                } else {
+                    log('Erro: ' + JSON.stringify(data.error), 'error');
+                }
+            } catch(e) { log('Erro de requisição', 'error'); }
+        };
+
+        // Validação de Sender
+        document.getElementById('btnVerifySender').onclick = async () => {
+             const phoneNumber = document.getElementById('newSenderNumber').value;
+             const code = document.getElementById('verifyCode').value;
+             
+             try {
+                const res = await fetch('/api/senders/verify', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ phoneNumber, code })
+                });
+                const data = await res.json();
+                if(data.success) {
+                    log('✅ Sender verificado e salvo!', 'success');
+                    loadSenders(); // Recarrega lista
+                    // Limpa campos
+                    document.getElementById('verifyCode').style.display = 'none';
+                    document.getElementById('btnVerifySender').style.display = 'none';
+                    document.getElementById('newSenderNumber').value = '';
+                } else {
+                    log('Erro na validação: ' + JSON.stringify(data.error), 'error');
+                }
+             } catch(e) { log('Erro de requisição de validação', 'error'); }
+        };
+
+
+        // --- Fila de Templates ---
+
+        // Adicionar à fila e contar cópias
         document.getElementById('templateForm').addEventListener('submit', (e) => {
             e.preventDefault();
             
             const name = document.getElementById('tplName').value.trim().toLowerCase().replace(/\s+/g, '_');
             const bodyText = document.getElementById('tplBody').value;
             const lang = document.getElementById('tplLang').value;
+            const copies = parseInt(document.getElementById('tplCopiesCount').value) || 1;
             
-            // Extrair exemplos básicos se houver variáveis {{1}}
             const variableCount = (bodyText.match(/\{\{\d+\}\}/g) || []).length;
             const examples = variableCount > 0 ? Array(variableCount).fill("Exemplo") : [];
 
-            const template = {
-                name: name,
-                language: lang,
-                category: "UTILITY",
-                structure: {
-                    body: {
-                        text: bodyText,
-                        examples: examples.length > 0 ? examples : undefined
-                    },
-                    type: "TEXT"
+            // A fila guarda a intenção, não as cópias expandidas ainda (para não poluir a UI)
+            // Ou guardamos expandido? Melhor guardar a intenção "Lote de X"
+            
+            const templateItem = {
+                baseName: name,
+                copies: copies, 
+                payload: {
+                    name: name, // Será modificado no backend ou aqui se expandirmos
+                    language: lang,
+                    category: "UTILITY",
+                    structure: {
+                        body: { text: bodyText, examples: examples.length > 0 ? examples : undefined },
+                        type: "TEXT"
+                    }
                 }
             };
 
-            templateQueue.push(template);
+            templateQueue.push(templateItem);
             updateQueueUI();
             
-            // Limpar formulário parcial
             document.getElementById('tplName').value = '';
             document.getElementById('tplBody').value = '';
             document.getElementById('tplName').focus();
         });
 
-        // Atualizar UI
+        // Atualizar UI da Fila
         function updateQueueUI() {
             const list = document.getElementById('queueList');
             const btn = document.getElementById('btnProcess');
@@ -131,11 +255,11 @@
             list.innerHTML = templateQueue.map((t, index) => `
                 <div class="template-card">
                     <div class="d-flex justify-content-between">
-                        <strong>${t.name}</strong>
+                        <strong>${t.baseName} ${t.copies > 1 ? `<span class="badge bg-info">${t.copies} cópias</span>` : ''}</strong>
                         <button class="btn btn-sm btn-outline-danger" onclick="removeFromQueue(${index})">×</button>
                     </div>
-                    <div class="small text-muted">${t.language} | UTILITY</div>
-                    <div class="mt-2 small text-truncate">${t.structure.body.text}</div>
+                    <div class="small text-muted">${t.payload.language} | UTILITY</div>
+                    <div class="mt-2 small text-truncate">${t.payload.structure.body.text}</div>
                 </div>
             `).join('');
         }
@@ -155,42 +279,56 @@
         // Processar Fila
         document.getElementById('btnProcess').addEventListener('click', async () => {
             const btn = document.getElementById('btnProcess');
+            const sender = document.getElementById('senderSelect').value;
+
+            if (!sender) {
+                alert('Por favor, selecione um SENDER antes de processar.');
+                return;
+            }
+
             btn.disabled = true;
             btn.textContent = 'Processando...';
-            log('Iniciando envio para Infobip...', 'info');
+            log(`Iniciando envio para Sender: ${sender}...`, 'info');
 
             try {
-                const response = await fetch('/api/templates/infobip', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ templates: templateQueue })
-                });
-
-                const result = await response.json();
-
-                if (result.results) {
-                    result.results.forEach(res => {
-                        if (res.success) {
-                            log(`✅ Template criado: ${res.name}`, 'success');
-                        } else {
-                            const errorMsg = typeof res.error === 'object' ? JSON.stringify(res.error) : res.error;
-                            log(`❌ Erro em ${res.name}: ${errorMsg}`, 'error');
-                        }
-                    });
+                // Processa item por item da fila (cada item pode gerar várias cópias)
+                for (const item of templateQueue) {
                     
-                    // Limpar fila apenas dos sucessos (opcional, aqui limpando tudo para simplificar)
-                    templateQueue = [];
-                    updateQueueUI();
-                    log('Processo finalizado.', 'info');
-                } else {
-                    log('Erro desconhecido na resposta.', 'error');
+                    // Prepara o payload para o backend (que agora aceita 'copies')
+                    const requestBody = {
+                        sender: sender,
+                        copies: item.copies,
+                        templates: [item.payload] // Manda um por vez para controlar melhor
+                    };
+
+                    const response = await fetch('/api/templates/infobip', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(requestBody)
+                    });
+
+                    const result = await response.json();
+
+                    if (result.results) {
+                        result.results.forEach(res => {
+                            if (res.success) {
+                                log(`✅ Template criado: ${res.name}`, 'success');
+                            } else {
+                                log(`❌ Erro em ${res.name}: ${typeof res.error === 'object' ? JSON.stringify(res.error) : res.error}`, 'error');
+                            }
+                        });
+                    }
                 }
+                
+                templateQueue = [];
+                updateQueueUI();
+                log('Fila finalizada.', 'info');
 
             } catch (error) {
                 log(`Erro de conexão: ${error.message}`, 'error');
             } finally {
                 btn.disabled = false;
-                btn.textContent = 'Criar Templates na Infobip';
+                btn.textContent = '⚙️ Criar Templates na Infobip';
             }
         });
     </script>
