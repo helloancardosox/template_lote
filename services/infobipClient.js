@@ -27,7 +27,7 @@ class InfobipClient {
    */
   async createTemplate(templateData) {
     try {
-      const response = await this.client.post('/whatsapp/1/senders/{sender}/templates', templateData);
+      const response = await this.client.post(`/whatsapp/1/senders/${this.sender}/templates`, templateData);
       return {
         success: true,
         data: response.data
@@ -47,7 +47,7 @@ class InfobipClient {
    */
   async getTemplates() {
     try {
-      const response = await this.client.get('/whatsapp/1/senders/{sender}/templates');
+      const response = await this.client.get(`/whatsapp/1/senders/${this.sender}/templates`);
       return {
         success: true,
         data: response.data
@@ -68,7 +68,7 @@ class InfobipClient {
    */
   async getTemplateByName(templateName) {
     try {
-      const response = await this.client.get(`/whatsapp/1/senders/{sender}/templates/${templateName}`);
+      const response = await this.client.get(`/whatsapp/1/senders/${this.sender}/templates/${templateName}`);
       return {
         success: true,
         data: response.data
@@ -89,7 +89,7 @@ class InfobipClient {
    */
   async deleteTemplate(templateName) {
     try {
-      const response = await this.client.delete(`/whatsapp/1/senders/{sender}/templates/${templateName}`);
+      const response = await this.client.delete(`/whatsapp/1/senders/${this.sender}/templates/${templateName}`);
       return {
         success: true,
         data: response.data
