@@ -1,0 +1,21 @@
+{
+  "name": "template_lote",
+  "version": "1.0.0",
+  "description": "criacao de template em lote utilizando api rest - infobip",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": ["infobip", "whatsapp", "templates", "meta"],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.18.2",
+    "dotenv": "^16.3.1",
+    "axios": "^1.6.0",
+    "cors": "^2.8.5"
+  }
+}
