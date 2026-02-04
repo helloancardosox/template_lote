@@ -3,18 +3,81 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Criador de Templates em Lote - Infobip</title>
+    <title>Template em Lote x INFOBIP</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
-        body { padding-top: 32px; background: linear-gradient(135deg, #f8fafc 0%, #e9ecef 100%); min-height: 100vh; }
-        .container { max-width: 950px; box-shadow: 0 4px 32px rgba(0,0,0,0.07); background: #fff; border-radius: 18px; padding: 32px 28px 24px 28px; }
-        .template-card { background: #f9fbfd; border: 1px solid #e3e7ed; border-radius: 10px; padding: 18px; margin-bottom: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.03); }
+                /* Placeholder branco no modo dark */
+                body.dark ::placeholder {
+                    color: #e9ecef !important;
+                    opacity: 1 !important;
+                }
+                body.dark input, body.dark textarea, body.dark select {
+                    color-scheme: dark;
+                }
+        body { padding-top: 32px; background: linear-gradient(135deg, #f8fafc 0%, #e9ecef 100%); min-height: 100vh; transition: background 0.3s, color 0.3s; }
+        .container { max-width: 950px; box-shadow: 0 4px 32px rgba(0,0,0,0.07); background: #fff; border-radius: 18px; padding: 32px 28px 24px 28px; transition: background 0.3s, color 0.3s; }
+        .template-card { background: #f9fbfd; border: 1px solid #e3e7ed; border-radius: 10px; padding: 18px; margin-bottom: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.03); transition: background 0.3s, color 0.3s; }
         .log-area { background: #181c20; color: #51cf66; padding: 18px; border-radius: 7px; height: 300px; overflow-y: auto; font-family: 'Fira Mono', monospace; font-size: 15px; }
         .form-label { font-weight: 500; }
         .btn:focus, .form-control:focus, .form-select:focus { box-shadow: 0 0 0 2px #0d6efd33 !important; }
         .card { border-radius: 12px; }
         .card-header { border-radius: 12px 12px 0 0; }
         .badge.bg-primary { font-size: 1rem; }
+        /* Dark mode */
+        body.dark {
+            background: linear-gradient(135deg, #181c20 0%, #23272f 100%);
+            color: #e9ecef;
+        }
+        body.dark .container {
+            background: #23272f;
+            color: #e9ecef;
+            box-shadow: 0 4px 32px rgba(0,0,0,0.25);
+        }
+        body.dark .template-card {
+            background: #23272f;
+            border: 1px solid #343a40;
+            color: #e9ecef;
+        }
+        body.dark .card, body.dark .card-header {
+            background: #23272f !important;
+            color: #e9ecef !important;
+        }
+        body.dark .form-control, body.dark .form-select {
+            background: #181c20;
+            color: #e9ecef;
+            border-color: #343a40;
+        }
+        body.dark .form-control:focus, body.dark .form-select:focus {
+            background: #23272f;
+            color: #e9ecef;
+        }
+        body.dark .btn, body.dark .btn:focus {
+            background: #23272f;
+            color: #e9ecef;
+            border-color: #343a40;
+        }
+        body.dark .bg-light {
+            background: #23272f !important;
+            color: #e9ecef !important;
+        }
+        body.dark .bg-white {
+            background: #23272f !important;
+            color: #e9ecef !important;
+        }
+        body.dark .bg-warning {
+            background: #b08900 !important;
+            color: #23272f !important;
+        }
+        body.dark .bg-primary {
+            background: #0d6efd !important;
+            color: #fff !important;
+        }
+        body.dark .text-dark {
+            color: #e9ecef !important;
+        }
+        body.dark .text-secondary {
+            color: #b0b8c1 !important;
+        }
         @media (max-width: 768px) {
             .container { padding: 10px 2vw; }
             .log-area { font-size: 13px; }
@@ -22,9 +85,13 @@
     </style>
 </head>
 <body>
+    <!-- Botão de alternância de tema -->
+    <button id="themeToggle" class="btn btn-outline-secondary position-fixed" style="top: 18px; right: 18px; z-index: 9999; border-radius: 50%; width: 48px; height: 48px; display: flex; align-items: center; justify-content: center; font-size: 1.5rem;">
+        <span id="themeIcon" class="bi bi-moon"></span>
+    </button>
     <div class="container">
         <h2 class="mb-4 text-primary d-flex align-items-center gap-2">
-            <img src="https://cdn-icons-png.flaticon.com/512/5968/5968778.png" alt="Infobip" width="38" height="38" style="margin-right:8px;"> Criador de Templates Massivo <span class="fs-5 text-secondary">Infobip</span>
+            <img src="/assets/LOGO-MD-ANTIGO.jpg" alt="Logo da Empresa" width="38" height="38" style="margin-right:8px; object-fit:contain; border-radius:6px;"> Template em Lote <span class="fs-5 text-secondary">x Infobip</span>
         </h2>
         
         <!-- Configuração de Sender -->
@@ -154,6 +221,33 @@
     <!-- Ícones Bootstrap -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
     <script>
+                // --- Alternância de Tema ---
+                const themeToggle = document.getElementById('themeToggle');
+                const themeIcon = document.getElementById('themeIcon');
+                // Salva preferência no localStorage
+                function setTheme(dark) {
+                    if (dark) {
+                        document.body.classList.add('dark');
+                        themeIcon.classList.remove('bi-sun');
+                        themeIcon.classList.add('bi-moon');
+                        localStorage.setItem('theme', 'dark');
+                    } else {
+                        document.body.classList.remove('dark');
+                        themeIcon.classList.remove('bi-moon');
+                        themeIcon.classList.add('bi-sun');
+                        localStorage.setItem('theme', 'light');
+                    }
+                }
+                // Detecta preferência inicial
+                const userPref = localStorage.getItem('theme');
+                if (userPref === 'dark' || (!userPref && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+                    setTheme(true);
+                } else {
+                    setTheme(false);
+                }
+                themeToggle.onclick = () => {
+                    setTheme(!document.body.classList.contains('dark'));
+                };
         let templateQueue = [];
 
         // --- Gerenciamento de Senders ---
