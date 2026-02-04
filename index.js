@@ -1,6 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
+const multer = require('multer');
 
 // ...existing code...
 
@@ -10,9 +11,34 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 app.use(express.static('public')); // Serve a interface estática
+app.use('/uploads', express.static('uploads'));
 
 const fs = require('fs');
 const path = require('path');
+
+const UPLOADS_DIR = path.join(__dirname, 'uploads');
+if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+
+const storage = multer.diskStorage({
+    destination: (req, file, cb) => cb(null, UPLOADS_DIR),
+    filename: (req, file, cb) => {
+        const ext = path.extname(file.originalname).toLowerCase();
+        const base = path.basename(file.originalname, ext).replace(/[^a-z0-9_-]/gi, '_');
+        cb(null, `${Date.now()}_${base}${ext}`);
+    }
+});
+
+const upload = multer({
+    storage,
+    limits: { fileSize: 5 * 1024 * 1024 },
+    fileFilter: (req, file, cb) => {
+        const ok = ['image/jpeg', 'image/jpg'].includes(file.mimetype);
+        if (!ok) return cb(new Error('Apenas imagens JPG s??o permitidas'));
+        cb(null, true);
+    }
+});
+
+
 
 // Configurações das APIs
 // Garante que a chave não tenha 'App ' duplicado se o usuário colocou no .env
@@ -226,22 +252,64 @@ app.post('/api/senders/verify', async (req, res) => {
 
 
 // Rota para criar template em lote (Infobip)
-app.post('/api/templates/infobip', async (req, res) => {
+app.post('/api/templates/infobip', upload.single('headerImage'), async (req, res) => {
   try {
-    const { templates, sender, copies } = req.body;
-    
-    // Usa o sender do corpo da requisição ou fallback (não recomendado fallback agora)
+    const sender = req.body.sender;
+    const copies = req.body.copies;
+
+    // Usa o sender do corpo da requisi??o ou fallback (n?o recomendado fallback agora)
     if (!sender) {
-        return res.status(400).json({ error: 'Você deve selecionar um Sender' });
+        return res.status(400).json({ error: 'Voc? deve selecionar um Sender' });
+    }
+
+    let templates = req.body.templates;
+    if (typeof templates === 'string') {
+        try {
+            templates = JSON.parse(templates);
+        } catch (e) {
+            return res.status(400).json({ error: 'Campo templates inv?lido (JSON esperado)' });
+        }
+    }
+
+    // Fallback para payloads enviados como campos individuais (FormData antigo)
+    if (!templates || !Array.isArray(templates)) {
+        const { name, language, category, structure } = req.body;
+        if (name && language && category && structure) {
+            let parsedStructure = structure;
+            if (typeof structure === 'string') {
+                try {
+                    parsedStructure = JSON.parse(structure);
+                } catch (e) {
+                    return res.status(400).json({ error: 'Campo structure inv?lido (JSON esperado)' });
+                }
+            }
+            templates = [{ name, language, category, structure: parsedStructure }];
+        }
     }
 
     if (!templates || !Array.isArray(templates)) {
       return res.status(400).json({ error: 'Templates deve ser um array' });
     }
 
+    let headerImageUrl = null;
+    if (req.file) {
+        const baseUrl = process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get('host')}`;
+        headerImageUrl = `${baseUrl}/uploads/${req.file.filename}`;
+    }
+
+    if (headerImageUrl) {
+        templates = templates.map(tpl => {
+            const newTpl = JSON.parse(JSON.stringify(tpl));
+            const structure = newTpl.structure || {};
+            structure.header = { format: 'IMAGE', example: headerImageUrl };
+            newTpl.structure = structure;
+            return newTpl;
+        });
+    }
+
     let templatesToProcess = [];
 
-    // Lógica de Cópias
+    // L?gica de C?pias
     const copyCount = parseInt(copies) || 1;
 
     if (copyCount > 1) {
@@ -249,10 +317,10 @@ app.post('/api/templates/infobip', async (req, res) => {
         templates.forEach(tpl => {
             const baseName = tpl.name;
             for (let i = 1; i <= copyCount; i++) {
-                // Cria cópia profunda do objeto template
+                // Cria c?pia profunda do objeto template
                 const newTpl = JSON.parse(JSON.stringify(tpl));
                 // Adiciona sufixo ao nome: ex nome_template_1, nome_template_2
-                // Verifica se já tem underscore no fim para evitar duplo
+                // Verifica se j? tem underscore no fim para evitar duplo
                 newTpl.name = `${baseName}_${i}`.toLowerCase().replace(/\s+/g, '_');
                 templatesToProcess.push(newTpl);
             }
@@ -263,11 +331,11 @@ app.post('/api/templates/infobip', async (req, res) => {
 
     const results = [];
     
-    console.log(`Iniciando criação de ${templatesToProcess.length} templates para o sender ${sender}...`);
+    console.log(`Iniciando cria??o de ${templatesToProcess.length} templates para o sender ${sender}...`);
 
     for (const template of templatesToProcess) {
       try {
-        // Validação básica do nome
+        // Valida??o b?sica do nome
         if (template.name) {
              template.name = template.name.toLowerCase().replace(/\s+/g, '_');
         }
@@ -286,16 +354,24 @@ app.post('/api/templates/infobip', async (req, res) => {
         console.log(`Template criado: ${template.name}`);
         results.push({ name: template.name, success: true, data: response.data });
       } catch (error) {
-        console.error(`Erro ao criar template ${template.name}:`, error.response?.data || error.message);
+        const status = error.response?.status;
+        const data = error.response?.data;
+        const headers = error.response?.headers;
+        console.error(`Erro ao criar template ${template.name}:`, {
+            status,
+            data,
+            headers,
+            message: error.message
+        });
         results.push({ 
             name: template.name, 
             success: false, 
-            error: error.response?.data || error.message 
+            error: data || error.message 
         });
       }
     }
 
-    res.json({ processed: results.length, results });
+    res.json({ processed: results.length, results, headerImageUrl });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

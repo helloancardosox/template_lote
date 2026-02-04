@@ -91,7 +91,8 @@
     </button>
     <div class="container">
         <h2 class="mb-4 text-primary d-flex align-items-center gap-2">
-            <img src="/assets/LOGO-MD-ANTIGO.jpg" alt="Logo da Empresa" width="38" height="38" style="margin-right:8px; object-fit:contain; border-radius:6px;"> Template em Lote <span class="fs-5 text-secondary">x Infobip</span>
+            <img src="/assets/LOGO-MD-ANTIGO.jpg" alt="Logo da Empresa" width="38" height="38" style="margin-right:8px; object-fit:contain; border-radius:6px;">
+            Template em Lote <span class="fs-5 text-secondary">x Infobip</span>
         </h2>
         
         <!-- Configuração de Sender -->
@@ -111,31 +112,6 @@
                         </button>
                     </div>
                 </div>
-                
-                <hr>
-                
-                <h6 class="text-muted">Cadastrar Novo Sender (Embedded Signup)</h6>
-                <div class="row g-3 align-items-end">
-                    <div class="col-md-3">
-                         <input type="text" class="form-control" id="newSenderNumber" placeholder="Número (ex: 5511999999999)">
-                    </div>
-                    <div class="col-md-3">
-                         <input type="text" class="form-control" id="newWabaId" placeholder="WABA ID (Business ID)">
-                    </div>
-                    <div class="col-md-2">
-                        <button class="btn btn-secondary w-100 d-flex align-items-center justify-content-center gap-1" id="btnRegisterSender">
-                            <span class="bi bi-person-plus me-1"></span>Registrar
-                        </button>
-                    </div>
-                    <div class="col-md-2">
-                        <input type="text" class="form-control" id="verifyCode" placeholder="Código PIN (6 dígitos)" style="display:none">
-                    </div>
-                    <div class="col-md-2">
-                        <button class="btn btn-success w-100 d-flex align-items-center justify-content-center gap-1" id="btnVerifySender" style="display:none">
-                            <span class="bi bi-shield-check me-1"></span>Validar PIN
-                        </button>
-                    </div>
-                </div>
             </div>
         </div>
 
@@ -145,6 +121,13 @@
                     <div class="card-header bg-white fw-bold">Definir Template Base</div>
                     <div class="card-body">
                         <form id="templateForm">
+                            <div class="mb-3">
+                                <label class="form-label">Imagem de Cabeçalho (JPG)</label>
+                                <input type="file" class="form-control" id="tplHeaderImageFile" accept="image/jpeg">
+                                <div class="form-text">Opcional. Apenas JPG. Será usada como header do template.</div>
+                                <img id="tplHeaderImagePreview" src="" alt="Preview Header" style="display:none; margin-top:8px; max-width:120px; border-radius:8px; border:1px solid #ccc;" />
+                            </div>
+
                             <div class="mb-3">
                                 <label class="form-label">Nome Base do Template</label>
                                 <input type="text" class="form-control" id="tplName" placeholder="ex: aviso_vencimento" required>
@@ -172,7 +155,6 @@
                                 <div class="form-text">Para variáveis use {{1}}, {{2}}</div>
                             </div>
 
-
                             <div class="mb-3">
                                 <label class="form-label">Botão Click to URL</label>
                                 <input type="url" class="form-control" id="tplButtonUrl" placeholder="https://wa.me/5511999999999">
@@ -181,7 +163,7 @@
 
                             <input type="hidden" id="tplCategory" value="UTILITY">
 
-                            <button type="submit" class="btn btn-success w-100 d-flex align-items-center justify-content-center gap-1">
+                            <button type="button" id="btnAddToQueue" class="btn btn-success w-100 d-flex align-items-center justify-content-center gap-1">
                                 <span class="bi bi-plus-circle me-1"></span>Adicionar à Fila
                             </button>
                         </form>
@@ -221,33 +203,65 @@
     <!-- Ícones Bootstrap -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
     <script>
-                // --- Alternância de Tema ---
-                const themeToggle = document.getElementById('themeToggle');
-                const themeIcon = document.getElementById('themeIcon');
-                // Salva preferência no localStorage
-                function setTheme(dark) {
-                    if (dark) {
-                        document.body.classList.add('dark');
-                        themeIcon.classList.remove('bi-sun');
-                        themeIcon.classList.add('bi-moon');
-                        localStorage.setItem('theme', 'dark');
-                    } else {
-                        document.body.classList.remove('dark');
-                        themeIcon.classList.remove('bi-moon');
-                        themeIcon.classList.add('bi-sun');
-                        localStorage.setItem('theme', 'light');
-                    }
-                }
-                // Detecta preferência inicial
-                const userPref = localStorage.getItem('theme');
-                if (userPref === 'dark' || (!userPref && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
-                    setTheme(true);
-                } else {
-                    setTheme(false);
-                }
-                themeToggle.onclick = () => {
-                    setTheme(!document.body.classList.contains('dark'));
-                };
+        function log(msg, type = 'info') {
+            const logArea = document.getElementById('logArea');
+            const color = type === 'error' ? '#ff6b6b' : (type === 'success' ? '#51cf66' : '#fff');
+            logArea.innerHTML += `<div style="color:${color}">[${new Date().toLocaleTimeString()}] ${msg}</div>`;
+            logArea.scrollTop = logArea.scrollHeight;
+        }
+
+        // --- Preview de Header Image por arquivo ---
+        const tplHeaderImageFile = document.getElementById('tplHeaderImageFile');
+        const tplHeaderImagePreview = document.getElementById('tplHeaderImagePreview');
+        tplHeaderImageFile.addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) {
+                tplHeaderImagePreview.style.display = 'none';
+                tplHeaderImagePreview.src = '';
+                return;
+            }
+            if (file.type !== 'image/jpeg') {
+                alert('Apenas arquivos JPG são permitidos!');
+                tplHeaderImageFile.value = '';
+                tplHeaderImagePreview.style.display = 'none';
+                tplHeaderImagePreview.src = '';
+                return;
+            }
+            const reader = new FileReader();
+            reader.onload = function(ev) {
+                tplHeaderImagePreview.src = ev.target.result;
+                tplHeaderImagePreview.style.display = 'block';
+            };
+            reader.readAsDataURL(file);
+        });
+
+        // --- Alternância de Tema (único e funcional) ---
+        const themeToggle = document.getElementById('themeToggle');
+        const themeIcon = document.getElementById('themeIcon');
+        function setTheme(dark) {
+            if (dark) {
+                document.body.classList.add('dark');
+                themeIcon.classList.remove('bi-sun');
+                themeIcon.classList.add('bi-moon');
+                localStorage.setItem('theme', 'dark');
+            } else {
+                document.body.classList.remove('dark');
+                themeIcon.classList.remove('bi-moon');
+                themeIcon.classList.add('bi-sun');
+                localStorage.setItem('theme', 'light');
+            }
+        }
+        // Detecta preferência inicial
+        const userPref = localStorage.getItem('theme');
+        if (userPref === 'dark' || (!userPref && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+            setTheme(true);
+        } else {
+            setTheme(false);
+        }
+        themeToggle.onclick = () => {
+            setTheme(!document.body.classList.contains('dark'));
+        };
+
         let templateQueue = [];
 
         // --- Gerenciamento de Senders ---
@@ -277,124 +291,115 @@
         document.getElementById('btnRefreshSenders').onclick = loadSenders;
         loadSenders(); // Load on start
 
-        // Registro de Sender
-        document.getElementById('btnRegisterSender').onclick = async () => {
-            const phoneNumber = document.getElementById('newSenderNumber').value;
-            const wabaId = document.getElementById('newWabaId').value;
-            
-            if(!phoneNumber || !wabaId) return alert('Preencha Número e WABA ID');
-
-            log('Solicitando registro do sender...', 'info');
-            try {
-                const res = await fetch('/api/senders/register', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ phoneNumber, wabaId, displayName: 'Novo Sender' })
-                });
-                const data = await res.json();
-                if(data.success) {
-                    log('✅ Código enviado! Verifique seu celular.', 'success');
-                    document.getElementById('verifyCode').style.display = 'block';
-                    document.getElementById('btnVerifySender').style.display = 'block';
-                } else {
-                    log('Erro: ' + JSON.stringify(data.error), 'error');
-                }
-            } catch(e) { log('Erro de requisição', 'error'); }
-        };
-
-        // Validação de Sender
-        document.getElementById('btnVerifySender').onclick = async () => {
-             const phoneNumber = document.getElementById('newSenderNumber').value;
-             const code = document.getElementById('verifyCode').value;
-             
-             try {
-                const res = await fetch('/api/senders/verify', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ phoneNumber, code })
-                });
-                const data = await res.json();
-                if(data.success) {
-                    log('✅ Sender verificado e salvo!', 'success');
-                    loadSenders(); // Recarrega lista
-                    // Limpa campos
-                    document.getElementById('verifyCode').style.display = 'none';
-                    document.getElementById('btnVerifySender').style.display = 'none';
-                    document.getElementById('newSenderNumber').value = '';
-                } else {
-                    log('Erro na validação: ' + JSON.stringify(data.error), 'error');
-                }
-             } catch(e) { log('Erro de requisição de validação', 'error'); }
-        };
-
-
         // --- Fila de Templates ---
+        const btnAddToQueue = document.getElementById('btnAddToQueue');
 
-        // Adicionar à fila e contar cópias, agora pedindo exemplos para variáveis
-        document.getElementById('templateForm').addEventListener('submit', async (e) => {
+        function normalizeTemplateName(rawName) {
+            return rawName.trim().toLowerCase().replace(/\s+/g, '_');
+        }
+
+        function collectVariableExamples(bodyText) {
+            const matches = bodyText.match(/\{\{\d+\}\}/g) || [];
+            const unique = Array.from(new Set(matches));
+            const examples = [];
+
+            for (let i = 0; i < unique.length; i++) {
+                let example = prompt(`Informe um exemplo para a variável ${unique[i]}:`);
+                if (!example) example = `Exemplo${i + 1}`;
+                examples.push(example);
+            }
+
+            return examples;
+        }
+
+        function buildTemplateStructure({ bodyText, buttonUrl }) {
+            const structure = {
+                type: 'TEXT',
+                body: { text: bodyText }
+            };
+
+            const examples = collectVariableExamples(bodyText);
+            if (examples.length > 0) {
+                structure.body.examples = examples;
+            }
+
+            if (buttonUrl) {
+                structure.buttons = [
+                    {
+                        type: 'URL',
+                        text: 'Abrir WhatsApp',
+                        url: buttonUrl
+                    }
+                ];
+            }
+
+            return structure;
+        }
+
+        function getHeaderImageOrNull() {
+            const file = tplHeaderImageFile.files?.[0] || null;
+            if (!file) return null;
+            if (file.type !== 'image/jpeg') {
+                alert('Apenas arquivos JPG são permitidos!');
+                tplHeaderImageFile.value = '';
+                tplHeaderImagePreview.style.display = 'none';
+                tplHeaderImagePreview.src = '';
+                return null;
+            }
+            return file;
+        }
+
+        btnAddToQueue.addEventListener('click', async (e) => {
             e.preventDefault();
-            const name = document.getElementById('tplName').value.trim().toLowerCase().replace(/\s+/g, '_');
+
+            const rawName = document.getElementById('tplName').value;
             const bodyText = document.getElementById('tplBody').value;
             const lang = document.getElementById('tplLang').value;
-            const copies = parseInt(document.getElementById('tplCopiesCount').value) || 1;
-            // const headerImage = document.getElementById('tplHeaderImage').value.trim();
+            const copies = parseInt(document.getElementById('tplCopiesCount').value, 10) || 1;
             const buttonUrl = document.getElementById('tplButtonUrl').value.trim();
 
-            const variableMatches = bodyText.match(/\{\{\d+\}\}/g) || [];
-            const variableCount = variableMatches.length;
-            let examples = [];
-
-            if (variableCount > 0) {
-                for (let i = 0; i < variableCount; i++) {
-                    let ex = prompt(`Informe um exemplo para a variável ${variableMatches[i]}:`);
-                    if (!ex) ex = `Exemplo${i+1}`;
-                    examples.push(ex);
-                }
+            if (!rawName.trim()) {
+                alert('Informe o nome do template.');
+                return;
+            }
+            if (!bodyText.trim()) {
+                alert('Informe o texto do corpo.');
+                return;
             }
 
+            const name = normalizeTemplateName(rawName);
+            const structure = buildTemplateStructure({ bodyText, buttonUrl });
+            const headerImage = getHeaderImageOrNull();
 
-            // Monta estrutura do template (type SEMPRE 'TEXT', sem header de imagem)
-            let structure = {
-                type: "TEXT",
-                body: { text: bodyText, examples: examples.length > 0 ? examples : undefined }
-            };
-
-            // Botão Click to URL
-            let buttons = [];
-            if (buttonUrl) {
-                buttons.push({
-                    type: "URL",
-                    text: "Abrir WhatsApp",
-                    url: buttonUrl
-                });
-            }
-            if (buttons.length > 0) {
-                structure.buttons = buttons;
+            // Se tiver imagem, marcamos o header como IMAGE (o arquivo vai no multipart)
+            if (headerImage) {
+                structure.header = { type: 'IMAGE' };
             }
 
-            const templateItem = {
+            templateQueue.push({
                 baseName: name,
-                copies: copies,
+                copies,
                 payload: {
-                    name: name,
+                    name,
                     language: lang,
-                    category: "UTILITY",
-                    structure: structure
-                }
-            };
+                    category: 'UTILITY',
+                    structure
+                },
+                headerImage
+            });
 
-            templateQueue.push(templateItem);
             updateQueueUI();
 
             document.getElementById('tplName').value = '';
             document.getElementById('tplBody').value = '';
-            // document.getElementById('tplHeaderImage').value = '';
+            tplHeaderImageFile.value = '';
+            tplHeaderImagePreview.style.display = 'none';
+            tplHeaderImagePreview.src = '';
             document.getElementById('tplButtonUrl').value = '';
             document.getElementById('tplName').focus();
-            // Feedback visual
-            const btn = document.querySelector('#templateForm button[type="submit"]');
-            btn.classList.add('btn-success');
-            setTimeout(() => btn.classList.remove('btn-success'), 400);
+
+            btnAddToQueue.classList.add('btn-success');
+            setTimeout(() => btnAddToQueue.classList.remove('btn-success'), 400);
         });
 
         // Atualizar UI da Fila
@@ -428,13 +433,6 @@
             updateQueueUI();
         };
 
-        function log(msg, type = 'info') {
-            const logArea = document.getElementById('logArea');
-            const color = type === 'error' ? '#ff6b6b' : (type === 'success' ? '#51cf66' : '#fff');
-            logArea.innerHTML += `<div style="color:${color}">[${new Date().toLocaleTimeString()}] ${msg}</div>`;
-            logArea.scrollTop = logArea.scrollHeight;
-        }
-
         // Processar Fila
         document.getElementById('btnProcess').addEventListener('click', async () => {
             const btn = document.getElementById('btnProcess');
@@ -450,46 +448,66 @@
             log(`Iniciando envio para Sender: ${sender}...`, 'info');
 
             try {
-                // Processa item por item da fila (cada item pode gerar várias cópias)
+                // Processa item por item da fila (cada item pode gerar v?rias c?pias)
                 for (const item of templateQueue) {
-                    
-                    // Prepara o payload para o backend (que agora aceita 'copies')
-                    const requestBody = {
-                        sender: sender,
-                        copies: item.copies,
-                        templates: [item.payload] // Manda um por vez para controlar melhor
-                    };
+                    const hasImage = Boolean(item.headerImage);
+                    let response;
 
-                    const response = await fetch('/api/templates/infobip', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(requestBody)
-                    });
+                    if (hasImage) {
+                        const formData = new FormData();
+                        formData.append('sender', sender);
+                        formData.append('copies', item.copies);
+                        formData.append('templates', JSON.stringify([item.payload]));
+                        formData.append('headerImage', item.headerImage);
+                        response = await fetch('/api/templates/infobip', {
+                            method: 'POST',
+                            body: formData
+                        });
+                    } else {
+                        response = await fetch('/api/templates/infobip', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                sender,
+                                copies: item.copies,
+                                templates: [item.payload]
+                            })
+                        });
+                    }
 
                     const result = await response.json();
+
+                    if (!response.ok) {
+                        log(`? Erro ao processar item: ${result.error || response.statusText}`, 'error');
+                        continue;
+                    }
+
+                    if (result.headerImageUrl) {
+                        log(`??? Imagem enviada: ${result.headerImageUrl}`, 'info');
+                    }
 
                     if (result.results) {
                         result.results.forEach(res => {
                             if (res.success) {
-                                log(`✅ Template criado: ${res.name}`, 'success');
+                                log(`? Template criado: ${res.name}`, 'success');
                             } else {
-                                log(`❌ Erro em ${res.name}: ${typeof res.error === 'object' ? JSON.stringify(res.error) : res.error}`, 'error');
+                                log(`? Erro em ${res.name}: ${typeof res.error === 'object' ? JSON.stringify(res.error) : res.error}`, 'error');
                             }
                         });
+                    } else {
+                        log('? Resposta inesperada da API ao criar template.', 'error');
                     }
                 }
-                
                 templateQueue = [];
                 updateQueueUI();
                 log('Fila finalizada.', 'info');
-
             } catch (error) {
-                log(`Erro de conexão: ${error.message}`, 'error');
+                log(`Erro de conex?o: ${error.message}`, 'error');
             } finally {
                 btn.disabled = false;
-                btn.textContent = '⚙️ Criar Templates na Infobip';
+                btn.textContent = '?? Criar Templates na Infobip';
             }
         });
-    </script>
+</script>
 </body>
 </html>
