@@ -8,13 +8,16 @@ const multer = require('multer');
 const cors = require('cors');
 
 const app = express();
+// Necessário quando está atrás de proxy/túnel (ex: ngrok) para `req.protocol` refletir `x-forwarded-proto`
+app.set('trust proxy', true);
 app.use(cors());
 app.use(express.json());
-app.use(express.static('public')); // Serve a interface estática
-app.use('/uploads', express.static('uploads'));
-
 const fs = require('fs');
 const path = require('path');
+
+app.use(express.static(path.join(__dirname, 'public'))); // Serve a interface estática
+app.use('/assets', express.static(path.join(__dirname, 'assets')));
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 const UPLOADS_DIR = path.join(__dirname, 'uploads');
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
@@ -293,7 +296,12 @@ app.post('/api/templates/infobip', upload.single('headerImage'), async (req, res
 
     let headerImageUrl = null;
     if (req.file) {
-        const baseUrl = process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get('host')}`;
+        const inferredBaseUrl = `${req.protocol}://${req.get('host')}`;
+        const configuredBaseUrl = process.env.PUBLIC_BASE_URL;
+        // Se estiver atrás de um host público (ex: ngrok), prioriza o host real da requisição.
+        // PUBLIC_BASE_URL fica útil só como override quando o host não é público (ex: localhost).
+        const isLocalHost = /^(localhost|127\.0\.0\.1)(:\d+)?$/i.test(req.get('host') || '');
+        const baseUrl = (!configuredBaseUrl || !isLocalHost) ? inferredBaseUrl : configuredBaseUrl;
         headerImageUrl = `${baseUrl}/uploads/${req.file.filename}`;
     }
 

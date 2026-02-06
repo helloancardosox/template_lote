@@ -1,0 +1,10 @@
+# Config local do ngrok (não força domínio fixo)
+version: "2"
+
+# Se você usa conta/ngrok com authtoken e quiser garantir login, adicione aqui:
+# authtoken: "SEU_AUTHTOKEN"
+
+tunnels:
+  app:
+    proto: http
+    addr: 3001
