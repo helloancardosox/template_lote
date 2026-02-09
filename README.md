@@ -14,10 +14,10 @@ npm install
 Crie um arquivo `.env` na raiz do projeto:
 
 ```
-INFOBIP_API_KEY=6780e7b1377596c3f9bc2d224a0234a9-5867bc97-31cc-4296-99a4-b9f447ad0869
+INFOBIP_API_KEY=SEU_TOKEN_AQUI
 INFOBIP_BASE_URL=38x6pj.api-us.infobip.com
 INFOBIP_SENDER=seu_numero_whatsapp_sender (ex: 5511999999999)
-PORT=3000
+PORT=3001
 ```
 
 ## Executar

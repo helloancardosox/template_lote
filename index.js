@@ -41,11 +41,21 @@ const upload = multer({
     }
 });
 
+// --- Log em tempo real (SSE) ---
+const logClients = new Set();
+
+function broadcastLog(payload) {
+    const data = `data: ${JSON.stringify(payload)}\n\n`;
+    for (const client of logClients) {
+        client.write(data);
+    }
+}
+
 
 
 // Configurações das APIs
 // Garante que a chave não tenha 'App ' duplicado se o usuário colocou no .env
-const RAW_KEY = process.env.INFOBIP_API_KEY || '6780e7b1377596c3f9bc2d224a0234a9-5867bc97-31cc-4296-99a4-b9f447ad0869';
+const RAW_KEY = process.env.INFOBIP_API_KEY || '';
 const INFOBIP_API_KEY = RAW_KEY.startsWith('App ') ? RAW_KEY.split(' ')[1] : RAW_KEY;
 // Garante que a URL base tenha https://
 let rawBaseUrl = process.env.INFOBIP_BASE_URL || '38x6pj.api-us.infobip.com';
@@ -77,6 +87,21 @@ function saveSender(senderData) {
 // Rota de teste
 app.get('/health', (req, res) => {
   res.json({ status: 'OK', message: 'API está funcionando' });
+});
+
+// Stream de logs (Server-Sent Events)
+app.get('/api/logs/stream', (req, res) => {
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        if (res.flushHeaders) res.flushHeaders();
+
+        res.write(`data: ${JSON.stringify({ type: 'info', message: 'Conectado ao log em tempo real.' })}\n\n`);
+        logClients.add(res);
+
+        req.on('close', () => {
+                logClients.delete(res);
+        });
 });
 
 // --- Rotas de Gerenciamento de Senders ---
@@ -306,6 +331,7 @@ app.post('/api/templates/infobip', upload.single('headerImage'), async (req, res
     }
 
     if (headerImageUrl) {
+        broadcastLog({ type: 'info', message: `Imagem enviada: ${headerImageUrl}` });
         templates = templates.map(tpl => {
             const newTpl = JSON.parse(JSON.stringify(tpl));
             const structure = newTpl.structure || {};
@@ -340,6 +366,10 @@ app.post('/api/templates/infobip', upload.single('headerImage'), async (req, res
     const results = [];
     
     console.log(`Iniciando cria??o de ${templatesToProcess.length} templates para o sender ${sender}...`);
+    broadcastLog({
+        type: 'info',
+        message: `Iniciando criacao de ${templatesToProcess.length} templates para o sender ${sender}...`
+    });
 
     for (const template of templatesToProcess) {
       try {
@@ -360,6 +390,7 @@ app.post('/api/templates/infobip', upload.single('headerImage'), async (req, res
                     }
                 );
         console.log(`Template criado: ${template.name}`);
+                broadcastLog({ type: 'success', message: `Template criado: ${template.name}` });
         results.push({ name: template.name, success: true, data: response.data });
       } catch (error) {
         const status = error.response?.status;
@@ -371,6 +402,10 @@ app.post('/api/templates/infobip', upload.single('headerImage'), async (req, res
             headers,
             message: error.message
         });
+                broadcastLog({
+                        type: 'error',
+                        message: `Erro ao criar template ${template.name}: ${data ? JSON.stringify(data) : error.message}`
+                });
         results.push({ 
             name: template.name, 
             success: false, 
@@ -381,6 +416,7 @@ app.post('/api/templates/infobip', upload.single('headerImage'), async (req, res
 
     res.json({ processed: results.length, results, headerImageUrl });
   } catch (error) {
+        broadcastLog({ type: 'error', message: `Erro ao processar fila: ${error.message}` });
     res.status(500).json({ error: error.message });
   }
 });

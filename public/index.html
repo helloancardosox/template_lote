@@ -210,6 +210,34 @@
             logArea.scrollTop = logArea.scrollHeight;
         }
 
+        // --- Log em tempo real via SSE ---
+        let logStreamConnected = false;
+        let logStream;
+
+        function startLogStream() {
+            if (logStream) return;
+            logStream = new EventSource('/api/logs/stream');
+
+            logStream.onopen = () => {
+                logStreamConnected = true;
+            };
+
+            logStream.onerror = () => {
+                logStreamConnected = false;
+            };
+
+            logStream.onmessage = (event) => {
+                try {
+                    const payload = JSON.parse(event.data);
+                    log(payload.message, payload.type || 'info');
+                } catch (e) {
+                    log(event.data, 'info');
+                }
+            };
+        }
+
+        startLogStream();
+
         // --- Preview de Header Image por arquivo ---
         const tplHeaderImageFile = document.getElementById('tplHeaderImageFile');
         const tplHeaderImagePreview = document.getElementById('tplHeaderImagePreview');
@@ -482,20 +510,22 @@
                         continue;
                     }
 
-                    if (result.headerImageUrl) {
-                        log(`??? Imagem enviada: ${result.headerImageUrl}`, 'info');
-                    }
+                    if (!logStreamConnected) {
+                        if (result.headerImageUrl) {
+                            log(`??? Imagem enviada: ${result.headerImageUrl}`, 'info');
+                        }
 
-                    if (result.results) {
-                        result.results.forEach(res => {
-                            if (res.success) {
-                                log(`? Template criado: ${res.name}`, 'success');
-                            } else {
-                                log(`? Erro em ${res.name}: ${typeof res.error === 'object' ? JSON.stringify(res.error) : res.error}`, 'error');
-                            }
-                        });
-                    } else {
-                        log('? Resposta inesperada da API ao criar template.', 'error');
+                        if (result.results) {
+                            result.results.forEach(res => {
+                                if (res.success) {
+                                    log(`? Template criado: ${res.name}`, 'success');
+                                } else {
+                                    log(`? Erro em ${res.name}: ${typeof res.error === 'object' ? JSON.stringify(res.error) : res.error}`, 'error');
+                                }
+                            });
+                        } else {
+                            log('? Resposta inesperada da API ao criar template.', 'error');
+                        }
                     }
                 }
                 templateQueue = [];
