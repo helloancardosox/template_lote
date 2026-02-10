@@ -1,4 +1,24 @@
-require('dotenv').config();
+const path = require('path');
+const fs = require('fs');
+const dotenv = require('dotenv');
+
+const ENV_PATH = path.join(__dirname, '.env');
+if (fs.existsSync(ENV_PATH)) {
+    const envBuf = fs.readFileSync(ENV_PATH);
+    let rawEnv = envBuf.toString('utf8');
+    // Se tiver muitos NULs, provavelmente esta em UTF-16LE.
+    if (rawEnv.includes('\u0000')) {
+        rawEnv = envBuf.toString('utf16le');
+    }
+    rawEnv = rawEnv.replace(/^\uFEFF/, '');
+    const parsed = dotenv.parse(rawEnv);
+    // Preenche process.env sem sobrescrever valores ja definidos.
+    for (const [key, value] of Object.entries(parsed)) {
+        if (process.env[key] === undefined) process.env[key] = value;
+    }
+} else {
+    console.error('[ERRO] Arquivo .env nao encontrado em:', ENV_PATH);
+}
 const express = require('express');
 const axios = require('axios');
 const multer = require('multer');
@@ -12,8 +32,6 @@ const app = express();
 app.set('trust proxy', true);
 app.use(cors());
 app.use(express.json());
-const fs = require('fs');
-const path = require('path');
 
 app.use(express.static(path.join(__dirname, 'public'))); // Serve a interface estática
 app.use('/assets', express.static(path.join(__dirname, 'assets')));
