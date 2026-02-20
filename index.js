@@ -124,6 +124,31 @@ app.get('/api/logs/stream', (req, res) => {
 
 // --- Rotas de Gerenciamento de Senders ---
 
+// Adicionar sender localmente (aparece no dropdown mesmo se a API não listar)
+app.post('/api/senders/local', (req, res) => {
+    try {
+        const phoneNumberRaw = req.body?.phoneNumber;
+        const displayNameRaw = req.body?.displayName;
+        if (!phoneNumberRaw) return res.status(400).json({ error: 'phoneNumber é obrigatório' });
+
+        const phoneNumber = String(phoneNumberRaw).replace(/\D+/g, '');
+        if (!phoneNumber) return res.status(400).json({ error: 'phoneNumber inválido' });
+
+        const displayName = displayNameRaw ? String(displayNameRaw) : phoneNumber;
+
+        saveSender({
+            phoneNumber,
+            displayName,
+            status: 'LOCAL',
+            source: 'LOCAL'
+        });
+
+        res.json({ success: true, sender: { phoneNumber, displayName } });
+    } catch (e) {
+        res.status(500).json({ error: 'Falha ao salvar sender local' });
+    }
+});
+
 // Listar Senders (Mescla Local + API Infobip)
 app.get('/api/senders', async (req, res) => {
     let allSenders = getSenders(); // Senders Salvos Localmente
@@ -135,52 +160,225 @@ app.get('/api/senders', async (req, res) => {
         return res.json(allSenders);
     }
 
+    function normalizeMsisdn(value) {
+        const digits = String(value || '').replace(/\D+/g, '');
+        return digits;
+    }
+
+    function isLikelyMsisdn(digits) {
+        // E.164 sem + (ex: 5511999999999). Evita IDs enormes.
+        return /^\d{10,15}$/.test(digits);
+    }
+
+    function extractPhoneNumber(item) {
+        if (!item) return '';
+        const candidates = [];
+
+        // Formatos mais comuns
+        if (typeof item.phoneNumber === 'string' || typeof item.phoneNumber === 'number') candidates.push(item.phoneNumber);
+        if (typeof item.sender === 'string' || typeof item.sender === 'number') candidates.push(item.sender);
+        if (typeof item.number === 'string' || typeof item.number === 'number') candidates.push(item.number);
+        if (typeof item.msisdn === 'string' || typeof item.msisdn === 'number') candidates.push(item.msisdn);
+        if (typeof item.numberKey === 'string' || typeof item.numberKey === 'number') candidates.push(item.numberKey);
+
+        // Aninhados
+        if (item.phoneNumber && typeof item.phoneNumber === 'object') {
+            if (item.phoneNumber.phoneNumber) candidates.push(item.phoneNumber.phoneNumber);
+            if (item.phoneNumber.msisdn) candidates.push(item.phoneNumber.msisdn);
+        }
+        if (item.sender && typeof item.sender === 'object') {
+            if (item.sender.phoneNumber) candidates.push(item.sender.phoneNumber);
+            if (item.sender.msisdn) candidates.push(item.sender.msisdn);
+        }
+        if (item.numberKey && typeof item.numberKey === 'object') {
+            if (item.numberKey.numberKey) candidates.push(item.numberKey.numberKey);
+            if (item.numberKey.phoneNumber) candidates.push(item.numberKey.phoneNumber);
+            if (item.numberKey.msisdn) candidates.push(item.numberKey.msisdn);
+        }
+        if (item.number && typeof item.number === 'object') {
+            if (item.number.number) candidates.push(item.number.number);
+            if (item.number.phoneNumber) candidates.push(item.number.phoneNumber);
+            if (item.number.msisdn) candidates.push(item.number.msisdn);
+        }
+
+        for (const c of candidates) {
+            const digits = normalizeMsisdn(c);
+            if (isLikelyMsisdn(digits)) return digits;
+        }
+
+        return '';
+    }
+
+    function upsertSender(senderObj) {
+        const phoneNumber = extractPhoneNumber(senderObj);
+        if (!phoneNumber) return;
+        const displayName = senderObj.displayName || senderObj.name || phoneNumber;
+        const source = senderObj.source || 'API';
+        const status = senderObj.status || 'VERIFIED';
+
+        const existingIndex = allSenders.findIndex(s => String(s.phoneNumber).replace(/\D+/g, '') === phoneNumber);
+        if (existingIndex === -1) {
+            allSenders.push({ phoneNumber, displayName, status, source });
+        } else {
+            allSenders[existingIndex] = {
+                ...allSenders[existingIndex],
+                phoneNumber,
+                displayName,
+                status,
+                source
+            };
+        }
+    }
+
+    // 1) Numbers API (nem sempre contem todos os WhatsApp senders)
     try {
-        // Tenta buscar da API da Infobip (Números comprados/registrados)
-        const response = await axios.get(
-            `${INFOBIP_BASE_URL}/numbers/1/numbers`,
-            {
-                headers: {
-                    'Authorization': `App ${INFOBIP_API_KEY}`,
-                    'Accept': 'application/json'
-                }
+        const response = await axios.get(`${INFOBIP_BASE_URL}/numbers/1/numbers`, {
+            headers: {
+                'Authorization': `App ${INFOBIP_API_KEY}`,
+                'Accept': 'application/json'
             }
-        );
+        });
 
         console.log('[DEBUG] Resposta API Numbers:', response.status);
 
-        if (response.data && response.data.numbers) {
-            const apiSenders = response.data.numbers
-                .filter(n => n.capabilities && n.capabilities.includes('WHATSAPP'))
-                .map(n => ({
-                    phoneNumber: n.number,
-                    displayName: n.number, 
+        const numbers = response.data?.numbers || [];
+        const apiSenders = numbers
+            .filter(n => Array.isArray(n?.capabilities) && n.capabilities.some(c => /whatsapp/i.test(String(c))))
+            .map(n => {
+                const msisdn = extractPhoneNumber(n);
+                return {
+                    phoneNumber: msisdn,
+                    displayName: msisdn,
                     status: 'VERIFIED',
-                    source: 'API'
-                }));
+                    source: 'NUMBERS_API'
+                };
+            })
+            .filter(s => s.phoneNumber);
 
-            console.log(`[DEBUG] Encontrados ${apiSenders.length} senders de WhatsApp na API.`);
-
-            // Mesclar evitando duplicatas (Prioriza o API se existir)
-            apiSenders.forEach(apiSender => {
-                const existingIndex = allSenders.findIndex(s => s.phoneNumber === apiSender.phoneNumber);
-                if (existingIndex === -1) {
-                    allSenders.push(apiSender);
-                } else {
-                    allSenders[existingIndex].status = 'VERIFIED';
-                    allSenders[existingIndex].source = 'API';
-                }
-            });
-        }
+        console.log(`[DEBUG] Encontrados ${apiSenders.length} senders via Numbers API.`);
+        apiSenders.forEach(upsertSender);
     } catch (error) {
-        console.error('Erro ao buscar senders da Infobip:', error.response?.status, error.message);
-        
+        console.error('Erro ao buscar numbers da Infobip:', error.response?.status, error.message);
         if (error.response?.status === 401) {
             console.error('[ERRO CRÍTICO] Falha de Autenticação (401). Verifique sua API KEY no .env.');
             console.error('Sua chave atual começa com:', RAW_KEY.substring(0, 10) + '...');
         }
         if (error.response?.status === 403) {
-            console.error('[ERRO] Permissão negada. Sua API KEY pode não ter permissão para listar Números.');
+            console.error('[ERRO] Permissão negada para listar Numbers.');
+        }
+    }
+
+    // 2) WhatsApp senders API (tenta mais de um endpoint)
+    function extractListFromResponseData(data) {
+        return Array.isArray(data)
+            ? data
+            : (Array.isArray(data?.senders) ? data.senders : (Array.isArray(data?.results) ? data.results : []));
+    }
+
+    function withHighLimit(urlPath) {
+        // Tenta buscar mais itens em uma única chamada quando a API suportar.
+        if (!urlPath.includes('?')) return `${urlPath}?limit=1000`;
+        if (/([?&])limit=\d+/i.test(urlPath)) return urlPath;
+        return `${urlPath}&limit=1000`;
+    }
+
+    function setQueryParam(fullUrl, key, value) {
+        const u = new URL(fullUrl);
+        u.searchParams.set(key, String(value));
+        return u.toString();
+    }
+
+    function getNextUrlFromResponse(response, currentFullUrl) {
+        const data = response?.data;
+
+        // Padrões de "next" por link
+        const nextLink = data?.paging?.next || data?.next || data?.nextPage || data?.links?.next?.href || data?.links?.next;
+        if (typeof nextLink === 'string' && nextLink.trim()) {
+            const trimmed = nextLink.trim();
+            return trimmed.startsWith('http') ? trimmed : `${INFOBIP_BASE_URL}${trimmed}`;
+        }
+
+        // Paginação por page/totalPages
+        if (typeof data?.page === 'number' && typeof data?.totalPages === 'number') {
+            const nextPage = data.page + 1;
+            if (nextPage < data.totalPages) {
+                return setQueryParam(currentFullUrl, 'page', nextPage);
+            }
+        }
+        if (typeof data?.pageNumber === 'number' && typeof data?.totalPages === 'number') {
+            const nextPage = data.pageNumber + 1;
+            if (nextPage < data.totalPages) {
+                return setQueryParam(currentFullUrl, 'pageNumber', nextPage);
+            }
+        }
+
+        // Paginação por offset/limit/totalCount
+        if (typeof data?.offset === 'number' && typeof data?.limit === 'number' && typeof data?.totalCount === 'number') {
+            const nextOffset = data.offset + data.limit;
+            if (nextOffset < data.totalCount) {
+                return setQueryParam(currentFullUrl, 'offset', nextOffset);
+            }
+        }
+
+        return null;
+    }
+
+    async function fetchAllWhatsAppSenders(urlPath) {
+        const results = [];
+        const seen = new Set();
+        let nextUrl = `${INFOBIP_BASE_URL}${withHighLimit(urlPath)}`;
+
+        for (let i = 0; i < 25; i++) {
+            const response = await axios.get(nextUrl, {
+                headers: {
+                    'Authorization': `App ${INFOBIP_API_KEY}`,
+                    'Accept': 'application/json'
+                }
+            });
+
+            const list = extractListFromResponseData(response.data);
+            for (const item of list) {
+                const phone = extractPhoneNumber(item);
+                if (!phone) continue;
+                if (seen.has(phone)) continue;
+                seen.add(phone);
+                results.push(item);
+            }
+
+            const computedNext = getNextUrlFromResponse(response, nextUrl);
+            if (!computedNext) break;
+            nextUrl = computedNext;
+        }
+
+        return { status: 200, list: results };
+    }
+
+    const waCandidates = ['/whatsapp/2/senders', '/whatsapp/1/senders'];
+    for (const candidate of waCandidates) {
+        try {
+            const { status, list } = await fetchAllWhatsAppSenders(candidate);
+            console.log(`[DEBUG] Resposta API WhatsApp senders (${candidate}):`, status);
+
+            let added = 0;
+            for (const s of list) {
+                const phone = extractPhoneNumber(s);
+                if (!phone) continue;
+                const name = s.displayName || s.name || phone;
+                const st = s.status || 'VERIFIED';
+                upsertSender({ phoneNumber: phone, displayName: name, status: st, source: `WHATSAPP_API:${candidate}` });
+                added++;
+            }
+            console.log(`[DEBUG] WhatsApp senders validos adicionados (${candidate}): ${added}`);
+
+            // Se esse endpoint retornou ao menos um sender valido, para por aqui.
+            if (added > 0) break;
+        } catch (error) {
+            const status = error.response?.status;
+            if (status && status !== 404) {
+                console.error(`Erro ao buscar WhatsApp senders (${candidate}):`, status, error.message);
+            } else {
+                console.log(`[DEBUG] WhatsApp senders endpoint ${candidate} indisponivel (ignorado).`);
+            }
         }
     }
     

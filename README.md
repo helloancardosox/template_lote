@@ -32,6 +32,56 @@ npm run dev
 npm start
 ```
 
+## Ngrok (túnel público)
+
+Se o `ngrok` não abre e aparece `ERR_NGROK_4018`, isso significa que você precisa de uma conta verificada e configurar o `authtoken`.
+
+### 1) Configurar authtoken (uma vez)
+
+- Crie/valide sua conta no painel do ngrok.
+- Copie o token em: https://dashboard.ngrok.com/get-started/your-authtoken
+- No PowerShell, rode:
+
+```bash
+ngrok config add-authtoken SEU_TOKEN_AQUI
+```
+
+Observação: prefira esse comando (ele salva no config do usuário). Evite colocar o token dentro do repositório.
+
+### 2) Subir a API e o túnel
+
+#### Jeito 1 (2 terminais)
+
+1. Terminal 1 (subir servidor):
+
+```bash
+npm run dev
+```
+
+2. Terminal 2 (subir ngrok para a porta 3001):
+
+```bash
+ngrok http 3001 --pooling-enabled
+```
+
+No plano Free, ao abrir a URL no navegador, pode aparecer uma tela de aviso do ngrok pedindo para clicar em “Visit Site”.
+
+1. Suba o servidor:
+
+```bash
+npm run dev
+```
+
+2. Em outro terminal, suba o ngrok usando a config local deste projeto:
+
+```bash
+ngrok start --all --config=ngrok-local.yml
+```
+
+O túnel aponta para a porta `3001` (ajuste `PORT` no `.env` e/ou o `addr` em `ngrok-local.yml` se mudar a porta).
+
+Dica: a UI local do ngrok costuma ser `http://127.0.0.1:4040`; se essa porta estiver ocupada, ele troca para `4041`, `4042`, etc.
+
 ## Endpoints
 
 ### Health Check
