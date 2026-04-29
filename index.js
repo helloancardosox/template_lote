@@ -41,6 +41,26 @@ const upload = multer({
     }
 });
 
+function cloneTemplate(template) {
+    return JSON.parse(JSON.stringify(template));
+}
+
+async function processWithConcurrency(items, limit, handler) {
+    const results = new Array(items.length);
+    let cursor = 0;
+
+    async function worker() {
+        while (cursor < items.length) {
+            const currentIndex = cursor++;
+            results[currentIndex] = await handler(items[currentIndex], currentIndex);
+        }
+    }
+
+    const workerCount = Math.min(Math.max(limit, 1), items.length || 1);
+    await Promise.all(Array.from({ length: workerCount }, () => worker()));
+    return results;
+}
+
 // --- Log em tempo real (SSE) ---
 const logClients = new Set();
 
@@ -61,6 +81,14 @@ const INFOBIP_API_KEY = RAW_KEY.startsWith('App ') ? RAW_KEY.split(' ')[1] : RAW
 let rawBaseUrl = process.env.INFOBIP_BASE_URL || '38x6pj.api-us.infobip.com';
 if (!rawBaseUrl.startsWith('http')) rawBaseUrl = 'https://' + rawBaseUrl;
 const INFOBIP_BASE_URL = rawBaseUrl.replace(/\/$/, ''); // remove barra final se houver
+const infobipClient = axios.create({
+    baseURL: INFOBIP_BASE_URL,
+    timeout: 30000,
+    headers: {
+        'Authorization': `App ${INFOBIP_API_KEY}`,
+        'Accept': 'application/json'
+    }
+});
 
 const SENDERS_FILE = path.join(__dirname, 'senders.json');
 
@@ -119,15 +147,7 @@ app.get('/api/senders', async (req, res) => {
 
     try {
         // Tenta buscar da API da Infobip (Números comprados/registrados)
-        const response = await axios.get(
-            `${INFOBIP_BASE_URL}/numbers/1/numbers`,
-            {
-                headers: {
-                    'Authorization': `App ${INFOBIP_API_KEY}`,
-                    'Accept': 'application/json'
-                }
-            }
-        );
+        const response = await infobipClient.get('/numbers/1/numbers');
 
         console.log('[DEBUG] Resposta API Numbers:', response.status);
 
@@ -174,12 +194,7 @@ app.get('/api/senders', async (req, res) => {
 app.get('/api/available-senders', async (req, res) => {
     try {
         // Busca todos os números comprados/registrados na conta
-        const response = await axios.get(`${INFOBIP_BASE_URL}/numbers/1/numbers`, {
-            headers: {
-                'Authorization': `App ${INFOBIP_API_KEY}`,
-                'Accept': 'application/json'
-            }
-        });
+        const response = await infobipClient.get('/numbers/1/numbers');
 
         // Filtra para manter apenas os que têm 'WHATSAPP' nas capabilities
         const numbers = response.data.numbers || [];
@@ -208,21 +223,14 @@ app.post('/api/senders/register', async (req, res) => {
         }
 
         // Endpoint Infobip: Trigger Registration
-        const response = await axios.post(
-            `${INFOBIP_BASE_URL}/whatsapp/1/embedded-signup/registrations/business-account/${wabaId}/senders`,
+        const response = await infobipClient.post(
+            `/whatsapp/1/embedded-signup/registrations/business-account/${wabaId}/senders`,
             {
                 countryCode: phoneNumber.substring(0, 2), // Assume 5511... -> 55
                 phoneNumber: phoneNumber.substring(2),    // Resto do número
                 displayName: displayName,
                 type: type,
                 locale: 'pt_BR'
-            },
-            {
-                headers: {
-                    'Authorization': `App ${INFOBIP_API_KEY}`,
-                    'Content-Type': 'application/json',
-                    'Accept': 'application/json'
-                }
             }
         );
 
@@ -252,16 +260,9 @@ app.post('/api/senders/verify', async (req, res) => {
         }
 
         // Endpoint Infobip: Verify Code
-        const response = await axios.post(
-            `${INFOBIP_BASE_URL}/whatsapp/1/embedded-signup/registrations/senders/${phoneNumber}/verification`,
-            { code: code },
-            {
-                headers: {
-                    'Authorization': `App ${INFOBIP_API_KEY}`,
-                    'Content-Type': 'application/json',
-                    'Accept': 'application/json'
-                }
-            }
+        const response = await infobipClient.post(
+            `/whatsapp/1/embedded-signup/registrations/senders/${phoneNumber}/verification`,
+            { code: code }
         );
 
         // Atualiza status local
@@ -333,7 +334,7 @@ app.post('/api/templates/infobip', upload.single('headerImage'), async (req, res
     if (headerImageUrl) {
         broadcastLog({ type: 'info', message: `Imagem enviada: ${headerImageUrl}` });
         templates = templates.map(tpl => {
-            const newTpl = JSON.parse(JSON.stringify(tpl));
+            const newTpl = cloneTemplate(tpl);
             const structure = newTpl.structure || {};
             structure.header = { format: 'IMAGE', example: headerImageUrl };
             newTpl.structure = structure;
@@ -352,7 +353,7 @@ app.post('/api/templates/infobip', upload.single('headerImage'), async (req, res
             const baseName = tpl.name;
             for (let i = 1; i <= copyCount; i++) {
                 // Cria c?pia profunda do objeto template
-                const newTpl = JSON.parse(JSON.stringify(tpl));
+                const newTpl = cloneTemplate(tpl);
                 // Adiciona sufixo ao nome: ex nome_template_1, nome_template_2
                 // Verifica se j? tem underscore no fim para evitar duplo
                 newTpl.name = `${baseName}_${i}`.toLowerCase().replace(/\s+/g, '_');
@@ -363,7 +364,10 @@ app.post('/api/templates/infobip', upload.single('headerImage'), async (req, res
         templatesToProcess = templates;
     }
 
-    const results = [];
+    const concurrency = Math.min(
+        Math.max(parseInt(process.env.TEMPLATE_CREATION_CONCURRENCY || '3', 10) || 3, 1),
+        10
+    );
     
     console.log(`Iniciando cria??o de ${templatesToProcess.length} templates para o sender ${sender}...`);
     broadcastLog({
@@ -371,27 +375,25 @@ app.post('/api/templates/infobip', upload.single('headerImage'), async (req, res
         message: `Iniciando criacao de ${templatesToProcess.length} templates para o sender ${sender}...`
     });
 
-    for (const template of templatesToProcess) {
+    const results = await processWithConcurrency(templatesToProcess, concurrency, async (template) => {
       try {
         // Valida??o b?sica do nome
         if (template.name) {
              template.name = template.name.toLowerCase().replace(/\s+/g, '_');
         }
 
-                const response = await axios.post(
-                    `${INFOBIP_BASE_URL}/whatsapp/2/senders/${sender}/templates`,
-                    template,
-                    {
-                        headers: {
-                            'Authorization': `App ${INFOBIP_API_KEY}`,
-                            'Content-Type': 'application/json',
-                            'Accept': 'application/json'
-                        }
-                    }
-                );
+        const response = await infobipClient.post(
+            `/whatsapp/2/senders/${sender}/templates`,
+            template,
+            {
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            }
+        );
         console.log(`Template criado: ${template.name}`);
-                broadcastLog({ type: 'success', message: `Template criado: ${template.name}` });
-        results.push({ name: template.name, success: true, data: response.data });
+        broadcastLog({ type: 'success', message: `Template criado: ${template.name}` });
+        return { name: template.name, success: true, data: response.data };
       } catch (error) {
         const status = error.response?.status;
         const data = error.response?.data;
@@ -402,17 +404,17 @@ app.post('/api/templates/infobip', upload.single('headerImage'), async (req, res
             headers,
             message: error.message
         });
-                broadcastLog({
-                        type: 'error',
-                        message: `Erro ao criar template ${template.name}: ${data ? JSON.stringify(data) : error.message}`
-                });
-        results.push({ 
-            name: template.name, 
-            success: false, 
-            error: data || error.message 
+        broadcastLog({
+            type: 'error',
+            message: `Erro ao criar template ${template.name}: ${data ? JSON.stringify(data) : error.message}`
         });
+        return {
+            name: template.name,
+            success: false,
+            error: data || error.message
+        };
       }
-    }
+    });
 
     res.json({ processed: results.length, results, headerImageUrl });
   } catch (error) {
