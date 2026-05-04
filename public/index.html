@@ -151,14 +151,24 @@
 
                             <div class="mb-3">
                                 <label class="form-label">Texto do Corpo</label>
-                                <textarea class="form-control" id="tplBody" rows="4" placeholder="Olá {{1}}, seu boleto vence hoje." required></textarea>
-                                <div class="form-text">Para variáveis use {{1}}, {{2}}</div>
+                                <textarea class="form-control" id="tplBody" rows="6" placeholder="Olá {{1}}, seu boleto vence hoje." required>ATENCAO! Informamos  que {{1}}
+
+{{2}}
+
+Use o botao abaixo para acessar mais informacoes.</textarea>
+                                <div class="form-text">Para variaveis use {{1}}, {{2}}. Os exemplos padrao ja serao preenchidos automaticamente.</div>
                             </div>
 
                             <div class="mb-3">
                                 <label class="form-label">Botão Click to URL</label>
                                 <input type="url" class="form-control" id="tplButtonUrl" placeholder="https://wa.me/5511999999999">
                                 <div class="form-text">Opcional. Exemplo: link para WhatsApp ou site.</div>
+                            </div>
+
+                            <div class="mb-3">
+                                <label class="form-label">Footer do Template</label>
+                                <input type="text" class="form-control" id="tplFooter" placeholder="Escreva sair para não receber mensagens">
+                                <div class="form-text">Opcional. Se preenchido, será enviado no footer do template.</div>
                             </div>
 
                             <input type="hidden" id="tplCategory" value="UTILITY">
@@ -203,16 +213,30 @@
     <!-- Ícones Bootstrap -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
     <script>
+        const MAX_LOG_LINES = 200;
+
         function log(msg, type = 'info') {
             const logArea = document.getElementById('logArea');
             const color = type === 'error' ? '#ff6b6b' : (type === 'success' ? '#51cf66' : '#fff');
-            logArea.innerHTML += `<div style="color:${color}">[${new Date().toLocaleTimeString()}] ${msg}</div>`;
+            if (logArea.childElementCount === 0 && logArea.textContent.trim().startsWith('Aguardando')) {
+                logArea.textContent = '';
+            }
+            const entry = document.createElement('div');
+            entry.style.color = color;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+            logArea.appendChild(entry);
+
+            while (logArea.childElementCount > MAX_LOG_LINES) {
+                logArea.removeChild(logArea.firstElementChild);
+            }
+
             logArea.scrollTop = logArea.scrollHeight;
         }
 
         // --- Log em tempo real via SSE ---
         let logStreamConnected = false;
         let logStream;
+        let logReconnectTimer;
 
         function startLogStream() {
             if (logStream) return;
@@ -224,6 +248,15 @@
 
             logStream.onerror = () => {
                 logStreamConnected = false;
+                logStream.close();
+                logStream = null;
+
+                if (!logReconnectTimer) {
+                    logReconnectTimer = setTimeout(() => {
+                        logReconnectTimer = null;
+                        startLogStream();
+                    }, 3000);
+                }
             };
 
             logStream.onmessage = (event) => {
@@ -321,6 +354,15 @@
 
         // --- Fila de Templates ---
         const btnAddToQueue = document.getElementById('btnAddToQueue');
+        const DEFAULT_BODY_TEXT = `ATENCAO! Informamos  que {{1}}
+
+{{2}}
+
+Use o botao abaixo para acessar mais informacoes.`;
+        const DEFAULT_VARIABLE_EXAMPLES = {
+            '{{1}}': 'seu comprovante #2543456bd de participacao foi liberado no dia 01/12/2025',
+            '{{2}}': 'O numero de confirmacao #1b32198 e demais detalhes ja estao disponiveis para consulta 01/12/2025'
+        };
 
         function normalizeTemplateName(rawName) {
             return rawName.trim().toLowerCase().replace(/\s+/g, '_');
@@ -332,15 +374,20 @@
             const examples = [];
 
             for (let i = 0; i < unique.length; i++) {
-                let example = prompt(`Informe um exemplo para a variável ${unique[i]}:`);
-                if (!example) example = `Exemplo${i + 1}`;
+                const variableKey = unique[i];
+                let example = DEFAULT_VARIABLE_EXAMPLES[variableKey];
+
+                if (!example) {
+                    example = `Exemplo${i + 1}`;
+                }
+
                 examples.push(example);
             }
 
             return examples;
         }
 
-        function buildTemplateStructure({ bodyText, buttonUrl }) {
+        function buildTemplateStructure({ bodyText, buttonUrl, footerText }) {
             const structure = {
                 type: 'TEXT',
                 body: { text: bodyText }
@@ -359,6 +406,12 @@
                         url: buttonUrl
                     }
                 ];
+            }
+
+            if (footerText) {
+                structure.footer = {
+                    text: footerText
+                };
             }
 
             return structure;
@@ -385,6 +438,7 @@
             const lang = document.getElementById('tplLang').value;
             const copies = parseInt(document.getElementById('tplCopiesCount').value, 10) || 1;
             const buttonUrl = document.getElementById('tplButtonUrl').value.trim();
+            const footerText = document.getElementById('tplFooter').value.trim();
 
             if (!rawName.trim()) {
                 alert('Informe o nome do template.');
@@ -396,7 +450,7 @@
             }
 
             const name = normalizeTemplateName(rawName);
-            const structure = buildTemplateStructure({ bodyText, buttonUrl });
+            const structure = buildTemplateStructure({ bodyText, buttonUrl, footerText });
             const headerImage = getHeaderImageOrNull();
 
             // Se tiver imagem, marcamos o header como IMAGE (o arquivo vai no multipart)
@@ -419,11 +473,12 @@
             updateQueueUI();
 
             document.getElementById('tplName').value = '';
-            document.getElementById('tplBody').value = '';
+            document.getElementById('tplBody').value = DEFAULT_BODY_TEXT;
             tplHeaderImageFile.value = '';
             tplHeaderImagePreview.style.display = 'none';
             tplHeaderImagePreview.src = '';
             document.getElementById('tplButtonUrl').value = '';
+            document.getElementById('tplFooter').value = '';
             document.getElementById('tplName').focus();
 
             btnAddToQueue.classList.add('btn-success');
@@ -444,16 +499,49 @@
                 return;
             }
 
-            list.innerHTML = templateQueue.map((t, index) => `
-                <div class="template-card">
-                    <div class="d-flex justify-content-between align-items-center">
-                        <strong>${t.baseName} ${t.copies > 1 ? `<span class="badge bg-info">${t.copies} cópias</span>` : ''}</strong>
-                        <button class="btn btn-sm btn-outline-danger d-flex align-items-center gap-1" onclick="removeFromQueue(${index})" title="Remover"><span class="bi bi-trash"></span></button>
-                    </div>
-                    <div class="small text-muted">${t.payload.language} | UTILITY</div>
-                    <div class="mt-2 small text-truncate">${t.payload.structure.body.text}</div>
-                </div>
-            `).join('');
+            list.replaceChildren();
+            const fragment = document.createDocumentFragment();
+
+            templateQueue.forEach((t, index) => {
+                const card = document.createElement('div');
+                card.className = 'template-card';
+
+                const header = document.createElement('div');
+                header.className = 'd-flex justify-content-between align-items-center';
+
+                const title = document.createElement('strong');
+                title.textContent = t.baseName;
+
+                if (t.copies > 1) {
+                    const badge = document.createElement('span');
+                    badge.className = 'badge bg-info ms-2';
+                    badge.textContent = `${t.copies} copias`;
+                    title.appendChild(badge);
+                }
+
+                const removeButton = document.createElement('button');
+                removeButton.className = 'btn btn-sm btn-outline-danger d-flex align-items-center gap-1';
+                removeButton.title = 'Remover';
+                removeButton.innerHTML = '<span class="bi bi-trash"></span>';
+                removeButton.addEventListener('click', () => removeFromQueue(index));
+
+                const meta = document.createElement('div');
+                meta.className = 'small text-muted';
+                meta.textContent = `${t.payload.language} | UTILITY`;
+
+                const preview = document.createElement('div');
+                preview.className = 'mt-2 small text-truncate';
+                preview.textContent = t.payload.structure.body.text;
+
+                header.appendChild(title);
+                header.appendChild(removeButton);
+                card.appendChild(header);
+                card.appendChild(meta);
+                card.appendChild(preview);
+                fragment.appendChild(card);
+            });
+
+            list.appendChild(fragment);
         }
 
         window.removeFromQueue = (index) => {

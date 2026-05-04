@@ -59,6 +59,26 @@ const upload = multer({
     }
 });
 
+function cloneTemplate(template) {
+    return JSON.parse(JSON.stringify(template));
+}
+
+async function processWithConcurrency(items, limit, handler) {
+    const results = new Array(items.length);
+    let cursor = 0;
+
+    async function worker() {
+        while (cursor < items.length) {
+            const currentIndex = cursor++;
+            results[currentIndex] = await handler(items[currentIndex], currentIndex);
+        }
+    }
+
+    const workerCount = Math.min(Math.max(limit, 1), items.length || 1);
+    await Promise.all(Array.from({ length: workerCount }, () => worker()));
+    return results;
+}
+
 // --- Log em tempo real (SSE) ---
 const logClients = new Set();
 
@@ -79,8 +99,68 @@ const INFOBIP_API_KEY = RAW_KEY.startsWith('App ') ? RAW_KEY.split(' ')[1] : RAW
 let rawBaseUrl = process.env.INFOBIP_BASE_URL || '38x6pj.api-us.infobip.com';
 if (!rawBaseUrl.startsWith('http')) rawBaseUrl = 'https://' + rawBaseUrl;
 const INFOBIP_BASE_URL = rawBaseUrl.replace(/\/$/, ''); // remove barra final se houver
+const infobipClient = axios.create({
+    baseURL: INFOBIP_BASE_URL,
+    timeout: 30000,
+    headers: {
+        'Authorization': `App ${INFOBIP_API_KEY}`,
+        'Accept': 'application/json'
+    }
+});
 
 const SENDERS_FILE = path.join(__dirname, 'senders.json');
+
+function normalizeSenderNumber(value) {
+    const digits = String(value || '').replace(/\D/g, '');
+    if (!digits) return '';
+    if (digits.startsWith('55')) return digits;
+    if (digits.length === 10 || digits.length === 11) return `55${digits}`;
+    return digits;
+}
+
+function getSenderNumber(senderData) {
+    return normalizeSenderNumber(
+        senderData?.phoneNumber ||
+        senderData?.number ||
+        senderData?.numberKey ||
+        senderData?.sender ||
+        senderData?.address
+    );
+}
+
+function hasWhatsAppCapability(numberData) {
+    const values = [
+        numberData?.channel,
+        numberData?.channelCode,
+        numberData?.resourceType,
+        numberData?.type,
+        ...(Array.isArray(numberData?.capabilities) ? numberData.capabilities : [numberData?.capabilities])
+    ];
+
+    return values
+        .filter(Boolean)
+        .some(value => String(value).toUpperCase().includes('WHATSAPP'));
+}
+
+function upsertSender(senders, senderData) {
+    const phoneNumber = getSenderNumber(senderData);
+    if (!phoneNumber) return senders;
+
+    const normalizedSender = {
+        ...senderData,
+        phoneNumber,
+        displayName: senderData.displayName || senderData.name || senderData.number || phoneNumber
+    };
+
+    const index = senders.findIndex(s => normalizeSenderNumber(s.phoneNumber) === phoneNumber);
+    if (index >= 0) {
+        senders[index] = { ...senders[index], ...normalizedSender };
+    } else {
+        senders.push(normalizedSender);
+    }
+
+    return senders;
+}
 
 // Helper para ler/escrever senders
 function getSenders() {
@@ -92,13 +172,7 @@ function getSenders() {
 
 function saveSender(senderData) {
     const senders = getSenders();
-    // Evita duplicatas pelo número
-    const index = senders.findIndex(s => s.phoneNumber === senderData.phoneNumber);
-    if (index >= 0) {
-        senders[index] = { ...senders[index], ...senderData };
-    } else {
-        senders.push(senderData);
-    }
+    upsertSender(senders, senderData);
     fs.writeFileSync(SENDERS_FILE, JSON.stringify(senders, null, 2));
 }
 
@@ -152,6 +226,18 @@ app.post('/api/senders/local', (req, res) => {
 // Listar Senders (Mescla Local + API Infobip)
 app.get('/api/senders', async (req, res) => {
     let allSenders = getSenders(); // Senders Salvos Localmente
+    const configuredSender = normalizeSenderNumber(process.env.INFOBIP_SENDER);
+
+    const hasConfiguredSender = allSenders.some(s => normalizeSenderNumber(s.phoneNumber) === configuredSender);
+
+    if (configuredSender && !hasConfiguredSender) {
+        upsertSender(allSenders, {
+            phoneNumber: configuredSender,
+            displayName: configuredSender,
+            status: 'VERIFIED',
+            source: 'ENV'
+        });
+    }
 
     console.log('[DEBUG] Tentando buscar senders na API...');
     
@@ -232,31 +318,29 @@ app.get('/api/senders', async (req, res) => {
 
     // 1) Numbers API (nem sempre contem todos os WhatsApp senders)
     try {
-        const response = await axios.get(`${INFOBIP_BASE_URL}/numbers/1/numbers`, {
-            headers: {
-                'Authorization': `App ${INFOBIP_API_KEY}`,
-                'Accept': 'application/json'
-            }
-        });
+        // Tenta buscar da API da Infobip (Números comprados/registrados)
+        const response = await infobipClient.get('/numbers/1/numbers');
 
         console.log('[DEBUG] Resposta API Numbers:', response.status);
 
-        const numbers = response.data?.numbers || [];
-        const apiSenders = numbers
-            .filter(n => Array.isArray(n?.capabilities) && n.capabilities.some(c => /whatsapp/i.test(String(c))))
-            .map(n => {
-                const msisdn = extractPhoneNumber(n);
-                return {
-                    phoneNumber: msisdn,
-                    displayName: msisdn,
+        if (response.data && response.data.numbers) {
+            const apiSenders = response.data.numbers
+                .filter(n => hasWhatsAppCapability(n))
+                .map(n => ({
+                    phoneNumber: getSenderNumber(n),
+                    displayName: n.displayName || n.name || n.number || n.numberKey || getSenderNumber(n), 
                     status: 'VERIFIED',
-                    source: 'NUMBERS_API'
-                };
-            })
-            .filter(s => s.phoneNumber);
+                    source: 'API'
+                }))
+                .filter(sender => sender.phoneNumber);
 
-        console.log(`[DEBUG] Encontrados ${apiSenders.length} senders via Numbers API.`);
-        apiSenders.forEach(upsertSender);
+            console.log(`[DEBUG] Encontrados ${apiSenders.length} senders de WhatsApp na API.`);
+
+            // Mesclar evitando duplicatas (Prioriza o API se existir)
+            apiSenders.forEach(apiSender => {
+                upsertSender(allSenders, apiSender);
+            });
+        }
     } catch (error) {
         console.error('Erro ao buscar numbers da Infobip:', error.response?.status, error.message);
         if (error.response?.status === 401) {
@@ -390,22 +474,18 @@ app.get('/api/senders', async (req, res) => {
 app.get('/api/available-senders', async (req, res) => {
     try {
         // Busca todos os números comprados/registrados na conta
-        const response = await axios.get(`${INFOBIP_BASE_URL}/numbers/1/numbers`, {
-            headers: {
-                'Authorization': `App ${INFOBIP_API_KEY}`,
-                'Accept': 'application/json'
-            }
-        });
+        const response = await infobipClient.get('/numbers/1/numbers');
 
         // Filtra para manter apenas os que têm 'WHATSAPP' nas capabilities
         const numbers = response.data.numbers || [];
         const whatsappSenders = numbers
-            .filter(n => n.capabilities && n.capabilities.includes('WHATSAPP'))
+            .filter(n => hasWhatsAppCapability(n))
             .map(n => ({
-                number: n.numberKey,
+                number: getSenderNumber(n),
                 country: n.country,
                 type: n.type
-            }));
+            }))
+            .filter(sender => sender.number);
 
         res.json(whatsappSenders);
     } catch (error) {
@@ -424,21 +504,14 @@ app.post('/api/senders/register', async (req, res) => {
         }
 
         // Endpoint Infobip: Trigger Registration
-        const response = await axios.post(
-            `${INFOBIP_BASE_URL}/whatsapp/1/embedded-signup/registrations/business-account/${wabaId}/senders`,
+        const response = await infobipClient.post(
+            `/whatsapp/1/embedded-signup/registrations/business-account/${wabaId}/senders`,
             {
                 countryCode: phoneNumber.substring(0, 2), // Assume 5511... -> 55
                 phoneNumber: phoneNumber.substring(2),    // Resto do número
                 displayName: displayName,
                 type: type,
                 locale: 'pt_BR'
-            },
-            {
-                headers: {
-                    'Authorization': `App ${INFOBIP_API_KEY}`,
-                    'Content-Type': 'application/json',
-                    'Accept': 'application/json'
-                }
             }
         );
 
@@ -468,16 +541,9 @@ app.post('/api/senders/verify', async (req, res) => {
         }
 
         // Endpoint Infobip: Verify Code
-        const response = await axios.post(
-            `${INFOBIP_BASE_URL}/whatsapp/1/embedded-signup/registrations/senders/${phoneNumber}/verification`,
-            { code: code },
-            {
-                headers: {
-                    'Authorization': `App ${INFOBIP_API_KEY}`,
-                    'Content-Type': 'application/json',
-                    'Accept': 'application/json'
-                }
-            }
+        const response = await infobipClient.post(
+            `/whatsapp/1/embedded-signup/registrations/senders/${phoneNumber}/verification`,
+            { code: code }
         );
 
         // Atualiza status local
@@ -549,7 +615,7 @@ app.post('/api/templates/infobip', upload.single('headerImage'), async (req, res
     if (headerImageUrl) {
         broadcastLog({ type: 'info', message: `Imagem enviada: ${headerImageUrl}` });
         templates = templates.map(tpl => {
-            const newTpl = JSON.parse(JSON.stringify(tpl));
+            const newTpl = cloneTemplate(tpl);
             const structure = newTpl.structure || {};
             structure.header = { format: 'IMAGE', example: headerImageUrl };
             newTpl.structure = structure;
@@ -568,7 +634,7 @@ app.post('/api/templates/infobip', upload.single('headerImage'), async (req, res
             const baseName = tpl.name;
             for (let i = 1; i <= copyCount; i++) {
                 // Cria c?pia profunda do objeto template
-                const newTpl = JSON.parse(JSON.stringify(tpl));
+                const newTpl = cloneTemplate(tpl);
                 // Adiciona sufixo ao nome: ex nome_template_1, nome_template_2
                 // Verifica se j? tem underscore no fim para evitar duplo
                 newTpl.name = `${baseName}_${i}`.toLowerCase().replace(/\s+/g, '_');
@@ -579,7 +645,10 @@ app.post('/api/templates/infobip', upload.single('headerImage'), async (req, res
         templatesToProcess = templates;
     }
 
-    const results = [];
+    const concurrency = Math.min(
+        Math.max(parseInt(process.env.TEMPLATE_CREATION_CONCURRENCY || '3', 10) || 3, 1),
+        10
+    );
     
     console.log(`Iniciando cria??o de ${templatesToProcess.length} templates para o sender ${sender}...`);
     broadcastLog({
@@ -587,27 +656,25 @@ app.post('/api/templates/infobip', upload.single('headerImage'), async (req, res
         message: `Iniciando criacao de ${templatesToProcess.length} templates para o sender ${sender}...`
     });
 
-    for (const template of templatesToProcess) {
+    const results = await processWithConcurrency(templatesToProcess, concurrency, async (template) => {
       try {
         // Valida??o b?sica do nome
         if (template.name) {
              template.name = template.name.toLowerCase().replace(/\s+/g, '_');
         }
 
-                const response = await axios.post(
-                    `${INFOBIP_BASE_URL}/whatsapp/2/senders/${sender}/templates`,
-                    template,
-                    {
-                        headers: {
-                            'Authorization': `App ${INFOBIP_API_KEY}`,
-                            'Content-Type': 'application/json',
-                            'Accept': 'application/json'
-                        }
-                    }
-                );
+        const response = await infobipClient.post(
+            `/whatsapp/2/senders/${sender}/templates`,
+            template,
+            {
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            }
+        );
         console.log(`Template criado: ${template.name}`);
-                broadcastLog({ type: 'success', message: `Template criado: ${template.name}` });
-        results.push({ name: template.name, success: true, data: response.data });
+        broadcastLog({ type: 'success', message: `Template criado: ${template.name}` });
+        return { name: template.name, success: true, data: response.data };
       } catch (error) {
         const status = error.response?.status;
         const data = error.response?.data;
@@ -618,17 +685,17 @@ app.post('/api/templates/infobip', upload.single('headerImage'), async (req, res
             headers,
             message: error.message
         });
-                broadcastLog({
-                        type: 'error',
-                        message: `Erro ao criar template ${template.name}: ${data ? JSON.stringify(data) : error.message}`
-                });
-        results.push({ 
-            name: template.name, 
-            success: false, 
-            error: data || error.message 
+        broadcastLog({
+            type: 'error',
+            message: `Erro ao criar template ${template.name}: ${data ? JSON.stringify(data) : error.message}`
         });
+        return {
+            name: template.name,
+            success: false,
+            error: data || error.message
+        };
       }
-    }
+    });
 
     res.json({ processed: results.length, results, headerImageUrl });
   } catch (error) {
