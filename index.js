@@ -92,6 +92,58 @@ const infobipClient = axios.create({
 
 const SENDERS_FILE = path.join(__dirname, 'senders.json');
 
+function normalizeSenderNumber(value) {
+    const digits = String(value || '').replace(/\D/g, '');
+    if (!digits) return '';
+    if (digits.startsWith('55')) return digits;
+    if (digits.length === 10 || digits.length === 11) return `55${digits}`;
+    return digits;
+}
+
+function getSenderNumber(senderData) {
+    return normalizeSenderNumber(
+        senderData?.phoneNumber ||
+        senderData?.number ||
+        senderData?.numberKey ||
+        senderData?.sender ||
+        senderData?.address
+    );
+}
+
+function hasWhatsAppCapability(numberData) {
+    const values = [
+        numberData?.channel,
+        numberData?.channelCode,
+        numberData?.resourceType,
+        numberData?.type,
+        ...(Array.isArray(numberData?.capabilities) ? numberData.capabilities : [numberData?.capabilities])
+    ];
+
+    return values
+        .filter(Boolean)
+        .some(value => String(value).toUpperCase().includes('WHATSAPP'));
+}
+
+function upsertSender(senders, senderData) {
+    const phoneNumber = getSenderNumber(senderData);
+    if (!phoneNumber) return senders;
+
+    const normalizedSender = {
+        ...senderData,
+        phoneNumber,
+        displayName: senderData.displayName || senderData.name || senderData.number || phoneNumber
+    };
+
+    const index = senders.findIndex(s => normalizeSenderNumber(s.phoneNumber) === phoneNumber);
+    if (index >= 0) {
+        senders[index] = { ...senders[index], ...normalizedSender };
+    } else {
+        senders.push(normalizedSender);
+    }
+
+    return senders;
+}
+
 // Helper para ler/escrever senders
 function getSenders() {
     try {
@@ -102,13 +154,7 @@ function getSenders() {
 
 function saveSender(senderData) {
     const senders = getSenders();
-    // Evita duplicatas pelo número
-    const index = senders.findIndex(s => s.phoneNumber === senderData.phoneNumber);
-    if (index >= 0) {
-        senders[index] = { ...senders[index], ...senderData };
-    } else {
-        senders.push(senderData);
-    }
+    upsertSender(senders, senderData);
     fs.writeFileSync(SENDERS_FILE, JSON.stringify(senders, null, 2));
 }
 
@@ -137,6 +183,18 @@ app.get('/api/logs/stream', (req, res) => {
 // Listar Senders (Mescla Local + API Infobip)
 app.get('/api/senders', async (req, res) => {
     let allSenders = getSenders(); // Senders Salvos Localmente
+    const configuredSender = normalizeSenderNumber(process.env.INFOBIP_SENDER);
+
+    const hasConfiguredSender = allSenders.some(s => normalizeSenderNumber(s.phoneNumber) === configuredSender);
+
+    if (configuredSender && !hasConfiguredSender) {
+        upsertSender(allSenders, {
+            phoneNumber: configuredSender,
+            displayName: configuredSender,
+            status: 'VERIFIED',
+            source: 'ENV'
+        });
+    }
 
     console.log('[DEBUG] Tentando buscar senders na API...');
     
@@ -153,25 +211,20 @@ app.get('/api/senders', async (req, res) => {
 
         if (response.data && response.data.numbers) {
             const apiSenders = response.data.numbers
-                .filter(n => n.capabilities && n.capabilities.includes('WHATSAPP'))
+                .filter(n => hasWhatsAppCapability(n))
                 .map(n => ({
-                    phoneNumber: n.number,
-                    displayName: n.number, 
+                    phoneNumber: getSenderNumber(n),
+                    displayName: n.displayName || n.name || n.number || n.numberKey || getSenderNumber(n), 
                     status: 'VERIFIED',
                     source: 'API'
-                }));
+                }))
+                .filter(sender => sender.phoneNumber);
 
             console.log(`[DEBUG] Encontrados ${apiSenders.length} senders de WhatsApp na API.`);
 
             // Mesclar evitando duplicatas (Prioriza o API se existir)
             apiSenders.forEach(apiSender => {
-                const existingIndex = allSenders.findIndex(s => s.phoneNumber === apiSender.phoneNumber);
-                if (existingIndex === -1) {
-                    allSenders.push(apiSender);
-                } else {
-                    allSenders[existingIndex].status = 'VERIFIED';
-                    allSenders[existingIndex].source = 'API';
-                }
+                upsertSender(allSenders, apiSender);
             });
         }
     } catch (error) {
@@ -199,12 +252,13 @@ app.get('/api/available-senders', async (req, res) => {
         // Filtra para manter apenas os que têm 'WHATSAPP' nas capabilities
         const numbers = response.data.numbers || [];
         const whatsappSenders = numbers
-            .filter(n => n.capabilities && n.capabilities.includes('WHATSAPP'))
+            .filter(n => hasWhatsAppCapability(n))
             .map(n => ({
-                number: n.numberKey,
+                number: getSenderNumber(n),
                 country: n.country,
                 type: n.type
-            }));
+            }))
+            .filter(sender => sender.number);
 
         res.json(whatsappSenders);
     } catch (error) {

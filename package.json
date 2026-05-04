@@ -6,6 +6,9 @@
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js",
+    "ngrok": "powershell -ExecutionPolicy Bypass -File scripts/ngrok-local.ps1",
+    "ngrok:check": "powershell -ExecutionPolicy Bypass -File scripts/ngrok-local.ps1 -Check",
+    "ngrok:token": "powershell -ExecutionPolicy Bypass -File scripts/ngrok-local.ps1 -SetAuthtoken",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [
