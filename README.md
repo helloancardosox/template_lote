@@ -1,22 +1,22 @@
 # Template Lote - Infobip & Meta
 
-Criação de template em lote utilizando API REST - Infobip e Meta
+Criacao de template em lote utilizando API REST - Infobip e Meta
 
-## Configuração
+## Configuracao
 
-### Instalar dependências
+### Instalar dependencias
 ```bash
 npm install
 ```
 
-### Variáveis de Ambiente
+### Variaveis de Ambiente
 
 Crie um arquivo `.env` na raiz do projeto:
 
 ```
 INFOBIP_API_KEY=SEU_TOKEN_AQUI
-INFOBIP_BASE_URL=38x6pj.api-us.infobip.com
-INFOBIP_SENDER=seu_numero_whatsapp_sender (ex: 5511999999999)
+INFOBIP_BASE_URL=seu-subdominio.api-us.infobip.com
+INFOBIP_SENDER=SEU_NUMERO_WHATSAPP_SENDER
 PORT=3001
 ```
 
@@ -27,14 +27,14 @@ PORT=3001
 npm run dev
 ```
 
-### Produção
+### Producao
 ```bash
 npm start
 ```
 
-## Ngrok (túnel público)
+## Ngrok (tunel publico)
 
-Se o `ngrok` não abre e aparece `ERR_NGROK_4018`, isso significa que você precisa de uma conta verificada e configurar o `authtoken`.
+Se o `ngrok` nao abre e aparece `ERR_NGROK_4018`, isso significa que voce precisa de uma conta verificada e configurar o `authtoken`.
 
 ### 1) Configurar authtoken (uma vez)
 
@@ -46,9 +46,9 @@ Se o `ngrok` não abre e aparece `ERR_NGROK_4018`, isso significa que você prec
 ngrok config add-authtoken SEU_TOKEN_AQUI
 ```
 
-Observação: prefira esse comando (ele salva no config do usuário). Evite colocar o token dentro do repositório.
+Observacao: prefira esse comando (ele salva no config do usuario). Evite colocar o token dentro do repositorio.
 
-### 2) Subir a API e o túnel
+### 2) Subir a API e o tunel
 
 #### Jeito 1 (2 terminais)
 
@@ -64,7 +64,7 @@ npm run dev
 ngrok http 3001 --pooling-enabled
 ```
 
-No plano Free, ao abrir a URL no navegador, pode aparecer uma tela de aviso do ngrok pedindo para clicar em “Visit Site”.
+No plano Free, ao abrir a URL no navegador, pode aparecer uma tela de aviso do ngrok pedindo para clicar em Visit Site.
 
 1. Suba o servidor:
 
@@ -78,7 +78,7 @@ npm run dev
 ngrok start --all --config=ngrok-local.yml
 ```
 
-O túnel aponta para a porta `3001` (ajuste `PORT` no `.env` e/ou o `addr` em `ngrok-local.yml` se mudar a porta).
+O tunel aponta para a porta `3001` (ajuste `PORT` no `.env` e/ou o `addr` em `ngrok-local.yml` se mudar a porta).
 
 Dica: a UI local do ngrok costuma ser `http://127.0.0.1:4040`; se essa porta estiver ocupada, ele troca para `4041`, `4042`, etc.
 
@@ -95,7 +95,7 @@ POST /api/templates/infobip
 Content-Type: application/json
 
 {
-  "sender": "5511999999999", // Opcional se estiver no .env
+  "sender": "SEU_NUMERO_WHATSAPP_SENDER",
   "templates": [
     {
       "name": "template_promo_verao",
@@ -103,10 +103,10 @@ Content-Type: application/json
       "category": "MARKETING",
       "structure": {
         "body": {
-          "text": "Olá {{1}}, confira nossas ofertas!",
+          "text": "Ola {{1}}, confira nossas ofertas!",
           "examples": ["Cliente"]
         },
-        "type": "TEXT" 
+        "type": "TEXT"
       }
     },
     {
@@ -120,7 +120,6 @@ Content-Type: application/json
   ]
 }
 ```
-
 
 ### Criar Templates Meta
 ```
