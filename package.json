@@ -1,7 +1,7 @@
 {
   "name": "template-lote",
   "version": "1.0.0",
-  "description": "Criação de template em lote utilizando API REST - Infobip e Meta",
+  "description": "Aplicacao web para criar templates de WhatsApp em lote na Infobip",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
@@ -13,7 +13,6 @@
   },
   "keywords": [
     "infobip",
-    "meta",
     "whatsapp",
     "template",
     "api",

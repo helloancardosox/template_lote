@@ -198,7 +198,7 @@ app.get('/api/logs/stream', (req, res) => {
 
 // --- Rotas de Gerenciamento de Senders ---
 
-// Adicionar sender localmente (aparece no dropdown mesmo se a API não listar)
+// Adicionar sender localmente para historico/status; nao alimenta o dropdown dinamico.
 app.post('/api/senders/local', (req, res) => {
     try {
         const phoneNumberRaw = req.body?.phoneNumber;
@@ -223,21 +223,9 @@ app.post('/api/senders/local', (req, res) => {
     }
 });
 
-// Listar Senders (Mescla Local + API Infobip)
+// Listar Senders dinamicamente pela Infobip/WhatsApp APIs
 app.get('/api/senders', async (req, res) => {
-    let allSenders = getSenders(); // Senders Salvos Localmente
-    const configuredSender = normalizeSenderNumber(process.env.INFOBIP_SENDER);
-
-    const hasConfiguredSender = allSenders.some(s => normalizeSenderNumber(s.phoneNumber) === configuredSender);
-
-    if (configuredSender && !hasConfiguredSender) {
-        upsertSender(allSenders, {
-            phoneNumber: configuredSender,
-            displayName: configuredSender,
-            status: 'VERIFIED',
-            source: 'ENV'
-        });
-    }
+    let allSenders = [];
 
     console.log('[DEBUG] Tentando buscar senders na API...');
     
@@ -576,9 +564,9 @@ app.post('/api/templates/infobip', upload.single('headerImage'), async (req, res
     const sender = req.body.sender;
     const copies = req.body.copies;
 
-    // Usa o sender do corpo da requisi??o ou fallback (n?o recomendado fallback agora)
+    // Sender obrigatorio: vem da selecao dinamica feita na tela.
     if (!sender) {
-        return res.status(400).json({ error: 'Voc? deve selecionar um Sender' });
+        return res.status(400).json({ error: 'Voce deve selecionar um Sender' });
     }
 
     let templates = req.body.templates;

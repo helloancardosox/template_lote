@@ -1,11 +1,13 @@
-# Template Lote - Infobip & Meta
+# Template Lote - Infobip
 
-Criação de template em lote utilizando API REST - Infobip e Meta
+Aplicacao web com backend Express para criar templates de WhatsApp em lote na Infobip.
+
+O projeto tem endpoints HTTP proprios, usados pela tela, e tambem chama as APIs da Infobip por baixo dos panos. O fluxo direto pela Meta/Graph API esta desativado no codigo atual.
 
 ## Configuração
 
 ### Instalar dependências
-```bash
+```terminal
 npm install
 ```
 
@@ -16,19 +18,20 @@ Crie um arquivo `.env` na raiz do projeto:
 ```
 INFOBIP_API_KEY=SEU_TOKEN_AQUI
 INFOBIP_BASE_URL=seu-subdominio.api-us.infobip.com
-INFOBIP_SENDER=SEU_NUMERO_WHATSAPP_SENDER
 PORT=3001
 ```
+
+Os senders nao ficam no `.env`. A tela carrega os remetentes dinamicamente da conta Infobip/WhatsApp e o template so pode ser criado depois que um sender for selecionado.
 
 ## Executar
 
 ### Desenvolvimento
-```bash
+```terminal
 npm run dev
 ```
 
 ### Produção
-```bash
+```terminal
 npm start
 ```
 
@@ -42,25 +45,25 @@ Se o `ngrok` não abre e aparece `ERR_NGROK_4018`, isso significa que você prec
 - Copie o token em: https://dashboard.ngrok.com/get-started/your-authtoken
 - No PowerShell, rode:
 
-```bash
+```terminal
 ngrok config add-authtoken SEU_TOKEN_AQUI
 ```
 
 Observação: prefira esse comando (ele salva no config do usuário). Evite colocar o token dentro do repositório.
 
-### 2) Subir a API e o túnel
+### 2) Subir o servidor e o tunel
 
 #### Jeito 1 (2 terminais)
 
 1. Terminal 1 (subir servidor):
 
-```bash
+```terminal
 npm run dev
 ```
 
 2. Terminal 2 (subir ngrok para a porta 3001):
 
-```bash
+```terminal
 ngrok http 3001 --pooling-enabled
 ```
 
@@ -68,13 +71,13 @@ No plano Free, ao abrir a URL no navegador, pode aparecer uma tela de aviso do n
 
 1. Suba o servidor:
 
-```bash
+```terminal
 npm run dev
 ```
 
 2. Em outro terminal, suba o ngrok usando a config local deste projeto:
 
-```bash
+```terminal
 ngrok start --all --config=ngrok-local.yml
 ```
 
@@ -84,9 +87,16 @@ Dica: a UI local do ngrok costuma ser `http://127.0.0.1:4040`; se essa porta est
 
 ## Endpoints
 
+Esses endpoints sao do backend local deste projeto.
+
 ### Health Check
 ```
 GET /health
+```
+
+### Listar Senders
+```
+GET /api/senders
 ```
 
 ### Criar Templates em Lote (Infobip)
@@ -95,46 +105,21 @@ POST /api/templates/infobip
 Content-Type: application/json
 
 {
-  "sender": "SEU_NUMERO_WHATSAPP_SENDER", // Opcional se estiver no .env
+  "sender": "SEU_NUMERO_WHATSAPP_SENDER", // Obrigatorio: selecionado da lista dinamica
   "templates": [
     {
-      "name": "template_promo_verao",
+      "name": "campanha_promocional",
       "language": "pt_BR",
-      "category": "MARKETING",
+      "category": "UTILITY",
       "structure": {
         "body": {
           "text": "Olá {{1}}, confira nossas ofertas!",
           "examples": ["Cliente"]
         },
         "type": "TEXT" 
-      }
-    },
-    {
-      "name": "template_aviso",
-      "language": "pt_BR",
-      "category": "UTILITY",
-      "structure": {
-         "body": { "text": "Seu pedido saiu para entrega." }
-      }
+      } 
     }
   ]
 }
 ```
 
-
-### Criar Templates Meta
-```
-POST /api/templates/meta
-Content-Type: application/json
-
-{
-  "templates": [
-    {
-      "name": "template_name",
-      "language": "pt_BR",
-      "category": "UTILITY",
-      "components": [...]
-    }
-  ]
-}
-```
