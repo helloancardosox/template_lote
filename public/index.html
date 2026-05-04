@@ -111,6 +111,10 @@
                             <span class="spinner-border spinner-border-sm me-1 d-none" id="refreshSpinner"></span>🔄 Atualizar
                         </button>
                     </div>
+                    <div class="col-md-6">
+                        <label class="form-label">API Key Interna (Se configurado)</label>
+                        <input type="password" class="form-control" id="internalApiKey" placeholder="Sua chave secreta para uso via ngrok">
+                    </div>
                 </div>
             </div>
         </div>
@@ -161,7 +165,7 @@ Use o botao abaixo para acessar mais informacoes.</textarea>
 
                             <div class="mb-3">
                                 <label class="form-label">Botão Click to URL</label>
-                                <input type="url" class="form-control" id="tplButtonUrl" placeholder="https://wa.me/5511999999999">
+                                <input type="url" class="form-control" id="tplButtonUrl" placeholder="https://wa.me/SEU_NUMERO">
                                 <div class="form-text">Opcional. Exemplo: link para WhatsApp ou site.</div>
                             </div>
 
@@ -564,6 +568,8 @@ Use o botao abaixo para acessar mais informacoes.`;
             log(`Iniciando envio para Sender: ${sender}...`, 'info');
 
             try {
+                const apiKey = document.getElementById('internalApiKey')?.value || '';
+                
                 // Processa item por item da fila (cada item pode gerar v?rias c?pias)
                 for (const item of templateQueue) {
                     const hasImage = Boolean(item.headerImage);
@@ -577,12 +583,16 @@ Use o botao abaixo para acessar mais informacoes.`;
                         formData.append('headerImage', item.headerImage);
                         response = await fetch('/api/templates/infobip', {
                             method: 'POST',
+                            headers: { ...(apiKey ? {'x-api-key': apiKey} : {}) },
                             body: formData
                         });
                     } else {
                         response = await fetch('/api/templates/infobip', {
                             method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
+                            headers: { 
+                                'Content-Type': 'application/json',
+                                ...(apiKey ? {'x-api-key': apiKey} : {})
+                            },
                             body: JSON.stringify({
                                 sender,
                                 copies: item.copies,

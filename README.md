@@ -1,15 +1,15 @@
 # Template Lote - Infobip & Meta
 
-Criacao de template em lote utilizando API REST - Infobip e Meta
+Criação de template em lote utilizando API REST - Infobip e Meta
 
-## Configuracao
+## Configuração
 
-### Instalar dependencias
+### Instalar dependências
 ```bash
 npm install
 ```
 
-### Variaveis de Ambiente
+### Variáveis de Ambiente
 
 Crie um arquivo `.env` na raiz do projeto:
 
@@ -27,14 +27,14 @@ PORT=3001
 npm run dev
 ```
 
-### Producao
+### Produção
 ```bash
 npm start
 ```
 
-## Ngrok (tunel publico)
+## Ngrok (túnel público)
 
-Se o `ngrok` nao abre e aparece `ERR_NGROK_4018`, isso significa que voce precisa de uma conta verificada e configurar o `authtoken`.
+Se o `ngrok` não abre e aparece `ERR_NGROK_4018`, isso significa que você precisa de uma conta verificada e configurar o `authtoken`.
 
 ### 1) Configurar authtoken (uma vez)
 
@@ -46,9 +46,9 @@ Se o `ngrok` nao abre e aparece `ERR_NGROK_4018`, isso significa que voce precis
 ngrok config add-authtoken SEU_TOKEN_AQUI
 ```
 
-Observacao: prefira esse comando (ele salva no config do usuario). Evite colocar o token dentro do repositorio.
+Observação: prefira esse comando (ele salva no config do usuário). Evite colocar o token dentro do repositório.
 
-### 2) Subir a API e o tunel
+### 2) Subir a API e o túnel
 
 #### Jeito 1 (2 terminais)
 
@@ -64,7 +64,7 @@ npm run dev
 ngrok http 3001 --pooling-enabled
 ```
 
-No plano Free, ao abrir a URL no navegador, pode aparecer uma tela de aviso do ngrok pedindo para clicar em Visit Site.
+No plano Free, ao abrir a URL no navegador, pode aparecer uma tela de aviso do ngrok pedindo para clicar em “Visit Site”.
 
 1. Suba o servidor:
 
@@ -78,7 +78,7 @@ npm run dev
 ngrok start --all --config=ngrok-local.yml
 ```
 
-O tunel aponta para a porta `3001` (ajuste `PORT` no `.env` e/ou o `addr` em `ngrok-local.yml` se mudar a porta).
+O túnel aponta para a porta `3001` (ajuste `PORT` no `.env` e/ou o `addr` em `ngrok-local.yml` se mudar a porta).
 
 Dica: a UI local do ngrok costuma ser `http://127.0.0.1:4040`; se essa porta estiver ocupada, ele troca para `4041`, `4042`, etc.
 
@@ -95,7 +95,7 @@ POST /api/templates/infobip
 Content-Type: application/json
 
 {
-  "sender": "SEU_NUMERO_WHATSAPP_SENDER",
+  "sender": "SEU_NUMERO_WHATSAPP_SENDER", // Opcional se estiver no .env
   "templates": [
     {
       "name": "template_promo_verao",
@@ -103,10 +103,10 @@ Content-Type: application/json
       "category": "MARKETING",
       "structure": {
         "body": {
-          "text": "Ola {{1}}, confira nossas ofertas!",
+          "text": "Olá {{1}}, confira nossas ofertas!",
           "examples": ["Cliente"]
         },
-        "type": "TEXT"
+        "type": "TEXT" 
       }
     },
     {
@@ -120,6 +120,7 @@ Content-Type: application/json
   ]
 }
 ```
+
 
 ### Criar Templates Meta
 ```

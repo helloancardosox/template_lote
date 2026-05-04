@@ -96,11 +96,11 @@ function broadcastLog(payload) {
 const RAW_KEY = process.env.INFOBIP_API_KEY || '';
 const INFOBIP_API_KEY = RAW_KEY.startsWith('App ') ? RAW_KEY.split(' ')[1] : RAW_KEY;
 // Garante que a URL base tenha https://
-let rawBaseUrl = process.env.INFOBIP_BASE_URL || '38x6pj.api-us.infobip.com';
-if (!rawBaseUrl.startsWith('http')) rawBaseUrl = 'https://' + rawBaseUrl;
+let rawBaseUrl = process.env.INFOBIP_BASE_URL || '';
+if (rawBaseUrl && !rawBaseUrl.startsWith('http')) rawBaseUrl = 'https://' + rawBaseUrl;
 const INFOBIP_BASE_URL = rawBaseUrl.replace(/\/$/, ''); // remove barra final se houver
 const infobipClient = axios.create({
-    baseURL: INFOBIP_BASE_URL,
+    baseURL: INFOBIP_BASE_URL || undefined,
     timeout: 30000,
     headers: {
         'Authorization': `App ${INFOBIP_API_KEY}`,
@@ -241,8 +241,8 @@ app.get('/api/senders', async (req, res) => {
 
     console.log('[DEBUG] Tentando buscar senders na API...');
     
-    if (!INFOBIP_API_KEY) {
-        console.error('[ERRO] INFOBIP_API_KEY não definida no .env');
+    if (!INFOBIP_API_KEY || !INFOBIP_BASE_URL) {
+        console.error('[ERRO] INFOBIP_API_KEY e INFOBIP_BASE_URL devem estar definidas no .env');
         return res.json(allSenders);
     }
 
@@ -252,7 +252,7 @@ app.get('/api/senders', async (req, res) => {
     }
 
     function isLikelyMsisdn(digits) {
-        // E.164 sem + (ex: 5511999999999). Evita IDs enormes.
+        // E.164 sem +. Evita IDs enormes.
         return /^\d{10,15}$/.test(digits);
     }
 
@@ -345,7 +345,6 @@ app.get('/api/senders', async (req, res) => {
         console.error('Erro ao buscar numbers da Infobip:', error.response?.status, error.message);
         if (error.response?.status === 401) {
             console.error('[ERRO CRÍTICO] Falha de Autenticação (401). Verifique sua API KEY no .env.');
-            console.error('Sua chave atual começa com:', RAW_KEY.substring(0, 10) + '...');
         }
         if (error.response?.status === 403) {
             console.error('[ERRO] Permissão negada para listar Numbers.');
@@ -507,7 +506,7 @@ app.post('/api/senders/register', async (req, res) => {
         const response = await infobipClient.post(
             `/whatsapp/1/embedded-signup/registrations/business-account/${wabaId}/senders`,
             {
-                countryCode: phoneNumber.substring(0, 2), // Assume 5511... -> 55
+                countryCode: phoneNumber.substring(0, 2), // Assume codigo do pais no inicio
                 phoneNumber: phoneNumber.substring(2),    // Resto do número
                 displayName: displayName,
                 type: type,
@@ -560,6 +559,16 @@ app.post('/api/senders/verify', async (req, res) => {
     }
 });
 
+
+// Middleware de Autenticação Interna
+const internalAuth = (req, res, next) => {
+    const apiKey = process.env.INTERNAL_API_KEY;
+    if (!apiKey) return next();
+    if (req.headers['x-api-key'] === apiKey) return next();
+    return res.status(401).json({ error: 'Não autorizado. x-api-key inválido ou ausente.' });
+};
+
+app.use('/api/templates', internalAuth);
 
 // Rota para criar template em lote (Infobip)
 app.post('/api/templates/infobip', upload.single('headerImage'), async (req, res) => {
