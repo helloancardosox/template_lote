@@ -1,0 +1,10 @@
+[
+  {
+    "phoneNumber": "SEU_NUMERO_WHATSAPP_SENDER",
+    "displayName": "Exemplo Sender 1"
+  },
+  {
+    "phoneNumber": "OUTRO_NUMERO_WHATSAPP_SENDER",
+    "displayName": "Exemplo Sender 2"
+  }
+]
