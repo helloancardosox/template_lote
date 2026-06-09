@@ -102,9 +102,12 @@
                 <div class="row g-3 align-items-end">
                     <div class="col-md-4">
                         <label class="form-label">Selecionar Sender Existente</label>
-                        <select class="form-select" id="senderSelect" autofocus>
-                            <option value="">Carregando...</option>
-                        </select>
+                        <div class="position-relative">
+                            <input type="text" class="form-control" id="senderSearch" placeholder="Carregando..." autocomplete="off" autofocus>
+                            <input type="hidden" id="senderSelect">
+                            <div id="senderDropdown" class="list-group position-absolute w-100 shadow-sm" style="z-index:1050; max-height:280px; overflow-y:auto; display:none;"></div>
+                        </div>
+                        <div class="form-text">Digite parte do número (ex: 95475-6661) ou do nome para filtrar.</div>
                     </div>
                     <div class="col-md-2">
                         <button class="btn btn-outline-dark w-100 d-flex align-items-center justify-content-center gap-1" id="btnRefreshSenders">
@@ -128,8 +131,14 @@
                             <div class="mb-3">
                                 <label class="form-label">Imagem de Cabeçalho (JPG)</label>
                                 <input type="file" class="form-control" id="tplHeaderImageFile" accept="image/jpeg">
-                                <div class="form-text">Opcional. Apenas JPG. Será usada como header do template.</div>
+                                <div class="form-text">Opcional. Apenas JPG. Requer URL pública (ngrok) — não funciona em localhost.</div>
                                 <img id="tplHeaderImagePreview" src="" alt="Preview Header" style="display:none; margin-top:8px; max-width:120px; border-radius:8px; border:1px solid #ccc;" />
+                            </div>
+
+                            <div class="mb-3">
+                                <label class="form-label">OU URL pública da imagem (JPG)</label>
+                                <input type="url" class="form-control" id="tplHeaderImageUrl" placeholder="https://.../imagem.jpg">
+                                <div class="form-text">Recomendado nesta rede. Cole um link público direto da imagem (a Infobip precisa conseguir baixar: JPG direto, https, sem redirecionamento). Se preenchido, ignora o arquivo acima.</div>
                             </div>
 
                             <div class="mb-3">
@@ -154,12 +163,25 @@
                             </div>
 
                             <div class="mb-3">
+                                <label class="form-label">Categoria</label>
+                                <select class="form-select" id="tplCategory">
+                                    <option value="UTILITY">UTILITY (utilitário/transacional)</option>
+                                    <option value="MARKETING">MARKETING (divulgação/oferta)</option>
+                                    <option value="AUTHENTICATION">AUTHENTICATION (códigos OTP)</option>
+                                </select>
+                                <div class="form-text">Use MARKETING para mensagens promocionais ("novidade", oferta) — UTILITY com tom de divulgação costuma ser reprovado pela Meta.</div>
+                            </div>
+
+                            <div class="mb-3">
                                 <label class="form-label">Texto do Corpo</label>
-                                <textarea class="form-control" id="tplBody" rows="6" placeholder="Olá {{1}}, seu boleto vence hoje." required>ATENCAO! Informamos  que {{1}}
+                                <textarea class="form-control" id="tplBody" rows="6" placeholder="Olá {{1}}, seu boleto vence hoje." required>Oi {{1}}! 
 
-{{2}}
+Temos uma novidade: {{2}}. 
 
-Use o botao abaixo para acessar mais informacoes.</textarea>
+{{3}} 
+
+Para {{4}}, use o botão abaixo 👇
+</textarea>
                                 <div class="form-text">Para variaveis use {{1}}, {{2}}. Os exemplos padrao ja serao preenchidos automaticamente.</div>
                             </div>
 
@@ -171,11 +193,9 @@ Use o botao abaixo para acessar mais informacoes.</textarea>
 
                             <div class="mb-3">
                                 <label class="form-label">Footer do Template</label>
-                                <input type="text" class="form-control" id="tplFooter" placeholder="Escreva sair para não receber mensagens">
+                                <input type="text" class="form-control" id="tplFooter" placeholder="Digite &quot;sair&quot; para não receber mais mensagens">
                                 <div class="form-text">Opcional. Se preenchido, será enviado no footer do template.</div>
                             </div>
-
-                            <input type="hidden" id="tplCategory" value="UTILITY">
 
                             <button type="button" id="btnAddToQueue" class="btn btn-success w-100 d-flex align-items-center justify-content-center gap-1">
                                 <span class="bi bi-plus-circle me-1"></span>Adicionar à Fila
@@ -330,25 +350,79 @@ Use o botao abaixo para acessar mais informacoes.</textarea>
         let templateQueue = [];
 
         // --- Gerenciamento de Senders ---
+        let allSendersData = [];
+        const senderSearch = document.getElementById('senderSearch');
+        const senderHidden = document.getElementById('senderSelect');
+        const senderDropdown = document.getElementById('senderDropdown');
+
+        function senderLabel(s) {
+            const mark = s.status === 'VERIFIED' ? '✅' : '⏳';
+            return `${mark} ${s.displayName || s.phoneNumber} (${s.phoneNumber})`;
+        }
+
+        function renderSenderOptions(filterText) {
+            const q = (filterText || '').trim().toLowerCase();
+            const qDigits = q.replace(/\D/g, '');
+            const matches = allSendersData.filter(s => {
+                const phone = String(s.phoneNumber || '');
+                const name = String(s.displayName || '').toLowerCase();
+                if (!q) return true;
+                const byPhone = qDigits && phone.replace(/\D/g, '').includes(qDigits);
+                const byName = name.includes(q);
+                return byPhone || byName;
+            }).slice(0, 100); // limita o que renderiza por vez
+
+            senderDropdown.replaceChildren();
+            if (matches.length === 0) {
+                const empty = document.createElement('div');
+                empty.className = 'list-group-item text-muted';
+                empty.textContent = 'Nenhum sender encontrado';
+                senderDropdown.appendChild(empty);
+            } else {
+                matches.forEach(s => {
+                    const item = document.createElement('button');
+                    item.type = 'button';
+                    item.className = 'list-group-item list-group-item-action';
+                    item.textContent = senderLabel(s);
+                    item.addEventListener('mousedown', (ev) => {
+                        ev.preventDefault(); // evita o blur fechar antes do clique
+                        senderHidden.value = s.phoneNumber;
+                        senderSearch.value = senderLabel(s);
+                        senderDropdown.style.display = 'none';
+                    });
+                    senderDropdown.appendChild(item);
+                });
+            }
+            senderDropdown.style.display = 'block';
+        }
+
+        senderSearch.addEventListener('input', () => {
+            senderHidden.value = ''; // qualquer digitação invalida a selecao anterior
+            renderSenderOptions(senderSearch.value);
+        });
+        senderSearch.addEventListener('focus', () => {
+            if (allSendersData.length) renderSenderOptions(senderSearch.value);
+        });
+        senderSearch.addEventListener('blur', () => {
+            setTimeout(() => { senderDropdown.style.display = 'none'; }, 150);
+        });
+
         async function loadSenders() {
-            const select = document.getElementById('senderSelect');
             const spinner = document.getElementById('refreshSpinner');
             if (spinner) spinner.classList.remove('d-none');
-            select.innerHTML = '<option>Carregando...</option>';
+            senderSearch.value = '';
+            senderHidden.value = '';
+            senderSearch.placeholder = 'Carregando...';
+            senderSearch.disabled = true;
             try {
                 const res = await fetch('/api/senders');
-                const senders = await res.json();
-                select.innerHTML = '<option value="">Selecione um sender...</option>';
-                senders.forEach(s => {
-                    const verifiedMark = s.status === 'VERIFIED' ? '✅' : '⏳';
-                    const option = document.createElement('option');
-                    option.value = s.phoneNumber;
-                    option.text = `${verifiedMark} ${s.displayName || s.phoneNumber} (${s.phoneNumber})`;
-                    select.appendChild(option);
-                });
+                allSendersData = await res.json();
+                senderSearch.placeholder = `Buscar entre ${allSendersData.length} senders...`;
             } catch (e) {
-                select.innerHTML = '<option>Erro ao carregar</option>';
+                allSendersData = [];
+                senderSearch.placeholder = 'Erro ao carregar senders';
             } finally {
+                senderSearch.disabled = false;
                 if (spinner) spinner.classList.add('d-none');
             }
         }
@@ -443,6 +517,8 @@ Use o botao abaixo para acessar mais informacoes.`;
             const copies = parseInt(document.getElementById('tplCopiesCount').value, 10) || 1;
             const buttonUrl = document.getElementById('tplButtonUrl').value.trim();
             const footerText = document.getElementById('tplFooter').value.trim();
+            const category = document.getElementById('tplCategory').value || 'UTILITY';
+            const headerImageUrl = document.getElementById('tplHeaderImageUrl').value.trim();
 
             if (!rawName.trim()) {
                 alert('Informe o nome do template.');
@@ -455,10 +531,19 @@ Use o botao abaixo para acessar mais informacoes.`;
 
             const name = normalizeTemplateName(rawName);
             const structure = buildTemplateStructure({ bodyText, buttonUrl, footerText });
-            const headerImage = getHeaderImageOrNull();
+            let headerImage = getHeaderImageOrNull();
 
-            // Se tiver imagem, marcamos o header como IMAGE (o arquivo vai no multipart)
-            if (headerImage) {
+            if (headerImageUrl) {
+                // URL publica tem prioridade: vai direto no template (sem upload local / ngrok).
+                if (!/^https:\/\//i.test(headerImageUrl)) {
+                    alert('A URL da imagem precisa comecar com https://');
+                    return;
+                }
+                structure.header = { format: 'IMAGE', example: headerImageUrl };
+                structure.type = 'MEDIA';
+                headerImage = null; // ignora o arquivo quando ha URL
+            } else if (headerImage) {
+                // Sem URL: usa o arquivo enviado (o arquivo vai no multipart)
                 structure.header = { type: 'IMAGE' };
             }
 
@@ -468,7 +553,7 @@ Use o botao abaixo para acessar mais informacoes.`;
                 payload: {
                     name,
                     language: lang,
-                    category: 'UTILITY',
+                    category,
                     structure
                 },
                 headerImage
@@ -481,6 +566,7 @@ Use o botao abaixo para acessar mais informacoes.`;
             tplHeaderImageFile.value = '';
             tplHeaderImagePreview.style.display = 'none';
             tplHeaderImagePreview.src = '';
+            document.getElementById('tplHeaderImageUrl').value = '';
             document.getElementById('tplButtonUrl').value = '';
             document.getElementById('tplFooter').value = '';
             document.getElementById('tplName').focus();
@@ -531,7 +617,7 @@ Use o botao abaixo para acessar mais informacoes.`;
 
                 const meta = document.createElement('div');
                 meta.className = 'small text-muted';
-                meta.textContent = `${t.payload.language} | UTILITY`;
+                meta.textContent = `${t.payload.language} | ${t.payload.category}`;
 
                 const preview = document.createElement('div');
                 preview.className = 'mt-2 small text-truncate';
@@ -556,10 +642,23 @@ Use o botao abaixo para acessar mais informacoes.`;
         // Processar Fila
         document.getElementById('btnProcess').addEventListener('click', async () => {
             const btn = document.getElementById('btnProcess');
-            const sender = document.getElementById('senderSelect').value;
+            let sender = senderHidden.value;
+
+            // Fallback: digitou um numero mas nao clicou na lista -> resolve se houver match unico.
+            if (!sender) {
+                const qDigits = senderSearch.value.replace(/\D/g, '');
+                if (qDigits) {
+                    const hits = allSendersData.filter(s => String(s.phoneNumber || '').replace(/\D/g, '').includes(qDigits));
+                    if (hits.length === 1) {
+                        sender = hits[0].phoneNumber;
+                        senderHidden.value = sender;
+                        senderSearch.value = senderLabel(hits[0]);
+                    }
+                }
+            }
 
             if (!sender) {
-                alert('Por favor, selecione um SENDER antes de processar.');
+                alert('Selecione um SENDER na lista (digite parte do numero e clique no resultado).');
                 return;
             }
 

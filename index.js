@@ -99,6 +99,10 @@ const INFOBIP_API_KEY = RAW_KEY.startsWith('App ') ? RAW_KEY.split(' ')[1] : RAW
 let rawBaseUrl = process.env.INFOBIP_BASE_URL || '';
 if (rawBaseUrl && !rawBaseUrl.startsWith('http')) rawBaseUrl = 'https://' + rawBaseUrl;
 const INFOBIP_BASE_URL = rawBaseUrl.replace(/\/$/, ''); // remove barra final se houver
+const SENDER_LOOKUP_TIMEOUT_MS = Math.min(
+    Math.max(parseInt(process.env.SENDER_LOOKUP_TIMEOUT_MS || '30000', 10) || 30000, 2000),
+    120000
+);
 const infobipClient = axios.create({
     baseURL: INFOBIP_BASE_URL || undefined,
     timeout: 30000,
@@ -176,6 +180,36 @@ function saveSender(senderData) {
     fs.writeFileSync(SENDERS_FILE, JSON.stringify(senders, null, 2));
 }
 
+// --- Cache em disco da lista de senders vinda da Infobip ---
+// Como a rede/proxy daqui as vezes derruba a paginacao e a lista volta incompleta,
+// guardamos a uniao acumulada. Assim a lista NUNCA regride: cada busca so acrescenta.
+const SENDERS_CACHE_FILE = path.join(__dirname, 'senders-cache.json');
+
+function readSenderCache() {
+    try {
+        if (!fs.existsSync(SENDERS_CACHE_FILE)) return [];
+        const data = JSON.parse(fs.readFileSync(SENDERS_CACHE_FILE, 'utf8'));
+        return Array.isArray(data) ? data : [];
+    } catch (e) { return []; }
+}
+
+function mergeAndPersistSenders(freshList) {
+    const byPhone = new Map();
+    const keyOf = v => String(v || '').replace(/\D+/g, '');
+    for (const s of readSenderCache()) {
+        const p = keyOf(s.phoneNumber);
+        if (p) byPhone.set(p, s);
+    }
+    for (const s of (Array.isArray(freshList) ? freshList : [])) {
+        const p = keyOf(s.phoneNumber);
+        if (!p) continue;
+        byPhone.set(p, { ...(byPhone.get(p) || {}), ...s }); // dado fresco sobrescreve
+    }
+    const merged = Array.from(byPhone.values());
+    try { fs.writeFileSync(SENDERS_CACHE_FILE, JSON.stringify(merged, null, 2)); } catch (e) {}
+    return merged;
+}
+
 // Rota de teste
 app.get('/health', (req, res) => {
   res.json({ status: 'OK', message: 'API está funcionando' });
@@ -231,7 +265,7 @@ app.get('/api/senders', async (req, res) => {
     
     if (!INFOBIP_API_KEY || !INFOBIP_BASE_URL) {
         console.error('[ERRO] INFOBIP_API_KEY e INFOBIP_BASE_URL devem estar definidas no .env');
-        return res.json(allSenders);
+        return res.json(readSenderCache());
     }
 
     function normalizeMsisdn(value) {
@@ -307,7 +341,9 @@ app.get('/api/senders', async (req, res) => {
     // 1) Numbers API (nem sempre contem todos os WhatsApp senders)
     try {
         // Tenta buscar da API da Infobip (Números comprados/registrados)
-        const response = await infobipClient.get('/numbers/1/numbers');
+        const response = await infobipClient.get('/numbers/1/numbers', {
+            timeout: SENDER_LOOKUP_TIMEOUT_MS
+        });
 
         console.log('[DEBUG] Resposta API Numbers:', response.status);
 
@@ -326,7 +362,7 @@ app.get('/api/senders', async (req, res) => {
 
             // Mesclar evitando duplicatas (Prioriza o API se existir)
             apiSenders.forEach(apiSender => {
-                upsertSender(allSenders, apiSender);
+                upsertSender(apiSender);
             });
         }
     } catch (error) {
@@ -348,9 +384,12 @@ app.get('/api/senders', async (req, res) => {
 
     function withHighLimit(urlPath) {
         // Tenta buscar mais itens em uma única chamada quando a API suportar.
-        if (!urlPath.includes('?')) return `${urlPath}?limit=1000`;
-        if (/([?&])limit=\d+/i.test(urlPath)) return urlPath;
-        return `${urlPath}&limit=1000`;
+        // v1 ignora estes parametros e devolve tudo; v2 usa "size" (ignora "limit") e pagina.
+        const params = [];
+        if (!/([?&])limit=\d+/i.test(urlPath)) params.push('limit=1000');
+        if (!/([?&])size=\d+/i.test(urlPath)) params.push('size=50');
+        if (params.length === 0) return urlPath;
+        return `${urlPath}${urlPath.includes('?') ? '&' : '?'}${params.join('&')}`;
     }
 
     function setQueryParam(fullUrl, key, value) {
@@ -367,6 +406,14 @@ app.get('/api/senders', async (req, res) => {
         if (typeof nextLink === 'string' && nextLink.trim()) {
             const trimmed = nextLink.trim();
             return trimmed.startsWith('http') ? trimmed : `${INFOBIP_BASE_URL}${trimmed}`;
+        }
+
+        // Paginação padrão Infobip (v2): { paging: { page, size, totalPages } } -> page/totalPages ficam ANINHADOS
+        if (data?.paging && typeof data.paging.page === 'number' && typeof data.paging.totalPages === 'number') {
+            const nextPage = data.paging.page + 1;
+            if (nextPage < data.paging.totalPages) {
+                return setQueryParam(currentFullUrl, 'page', nextPage);
+            }
         }
 
         // Paginação por page/totalPages
@@ -400,12 +447,33 @@ app.get('/api/senders', async (req, res) => {
         let nextUrl = `${INFOBIP_BASE_URL}${withHighLimit(urlPath)}`;
 
         for (let i = 0; i < 25; i++) {
-            const response = await axios.get(nextUrl, {
-                headers: {
-                    'Authorization': `App ${INFOBIP_API_KEY}`,
-                    'Accept': 'application/json'
+            let response;
+            let lastErr = null;
+            // Retry por pagina: a rede/proxy daqui derruba requisicoes; tenta algumas vezes.
+            for (let attempt = 1; attempt <= 3; attempt++) {
+                try {
+                    response = await axios.get(nextUrl, {
+                        timeout: SENDER_LOOKUP_TIMEOUT_MS,
+                        headers: {
+                            'Authorization': `App ${INFOBIP_API_KEY}`,
+                            'Accept': 'application/json'
+                        }
+                    });
+                    lastErr = null;
+                    break;
+                } catch (err) {
+                    lastErr = err;
+                    console.error(`[DEBUG] Pagina ${i} tentativa ${attempt}/3 falhou: ${err.message}`);
                 }
-            });
+            }
+            if (lastErr) {
+                // Se ja coletamos algo, devolve o parcial em vez de perder tudo.
+                if (results.length > 0) {
+                    console.error(`[DEBUG] Desistindo da pagina ${i}; retornando ${results.length} coletados ate aqui.`);
+                    break;
+                }
+                throw lastErr; // primeira pagina falhou: deixa o chamador tentar o proximo endpoint
+            }
 
             const list = extractListFromResponseData(response.data);
             for (const item of list) {
@@ -453,7 +521,10 @@ app.get('/api/senders', async (req, res) => {
         }
     }
     
-    res.json(allSenders);
+    // Mescla com o cache em disco (uniao acumulada) para nunca regredir em buscas parciais.
+    const merged = mergeAndPersistSenders(allSenders);
+    console.log(`[DEBUG] Senders nesta busca: ${allSenders.length} | total acumulado (cache): ${merged.length}`);
+    res.json(merged);
 });
 
 
@@ -611,10 +682,24 @@ app.post('/api/templates/infobip', upload.single('headerImage'), async (req, res
 
     if (headerImageUrl) {
         broadcastLog({ type: 'info', message: `Imagem enviada: ${headerImageUrl}` });
+
+        // A Infobip (e a Meta) precisam BAIXAR essa URL. Se nao for publica, retorna
+        // "Template's example cannot be downloaded". Avisa o usuario quando o host for local/privado.
+        const hostForImage = (() => { try { return new URL(headerImageUrl).hostname; } catch { return ''; } })();
+        const isPrivateHost = /^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/i.test(hostForImage);
+        if (isPrivateHost) {
+            broadcastLog({
+                type: 'error',
+                message: `ATENCAO: a imagem esta em um endereco privado (${hostForImage}) que a Infobip NAO consegue acessar. Rode atras do ngrok ou defina PUBLIC_BASE_URL com uma URL publica https, senao o template de imagem sera rejeitado.`
+            });
+        }
+
         templates = templates.map(tpl => {
             const newTpl = cloneTemplate(tpl);
             const structure = newTpl.structure || {};
             structure.header = { format: 'IMAGE', example: headerImageUrl };
+            // Templates com header de midia precisam de type MEDIA (nao TEXT).
+            structure.type = 'MEDIA';
             newTpl.structure = structure;
             return newTpl;
         });
